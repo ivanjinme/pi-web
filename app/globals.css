@@ -1233,8 +1233,8 @@ span.linenumber {
   }
   .sidebar-resizer:hover::after,
   .sidebar-container.is-resizing .sidebar-resizer::after {
-    width: 2px;
-    background: var(--accent);
+    width: 1px;
+    background: transparent;
   }
   .sidebar-closed .sidebar-resizer {
     display: none;
@@ -1458,8 +1458,8 @@ span.linenumber {
 }
 
 .right-workspace-resizer:hover::after {
-  width: 2px;
-  background: var(--accent);
+  width: 1px;
+  background: transparent;
 }
 
 .right-file-pane {
@@ -1555,8 +1555,8 @@ span.linenumber {
 }
 
 .right-panel-resizer:hover::after {
-  width: 2px;
-  background: var(--accent);
+  width: 1px;
+  background: transparent;
 }
 
 .right-panel-closed .right-panel-resizer {
