@@ -10,8 +10,8 @@ const notoSansMono = Noto_Sans_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Pi Web",
-  description: "Pi Web interface for the pi coding agent",
+  title: "weclio",
+  description: "weclio interface for the pi coding agent",
 };
 
 export default function RootLayout({
@@ -25,7 +25,7 @@ export default function RootLayout({
         <meta name="google" content="notranslate" />
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem("pi-theme");if(t==="dark")document.documentElement.classList.add("dark")}catch(e){}})();`,
+            __html: `(function(){try{var d=document.documentElement,t=localStorage.getItem("pi-theme");if(t==="dark")d.classList.add("dark");var w=Number(localStorage.getItem("pi-web:sidebar-width"));if(Number.isFinite(w)&&w>=240&&w<=480)d.style.setProperty("--saved-sidebar-width",w+"px")}catch(e){}})();`,
           }}
         />
       </head>

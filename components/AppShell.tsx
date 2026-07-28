@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useLayoutEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import { FileViewer } from "./FileViewer";
+import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { TabBar, type Tab } from "./TabBar";
 import { ModelsConfig } from "./ModelsConfig";
 import { SkillsConfig } from "./SkillsConfig";
@@ -25,14 +26,17 @@ import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 
 type SessionCopyField = "file" | "id";
-type AutoNameStatus =
-  | { kind: "idle" }
-  | { kind: "naming" }
-  | { kind: "success" }
-  | { kind: "error"; message: string };
 
 const TOP_BAR_ICON_BUTTON_SIZE = 36;
 const LANGUAGE_MENU_WIDTH = 176;
+const SIDEBAR_DEFAULT_WIDTH = 300;
+const SIDEBAR_MIN_WIDTH = 240;
+const SIDEBAR_MAX_WIDTH = 480;
+const SIDEBAR_COLLAPSE_THRESHOLD = 180;
+const SIDEBAR_WIDTH_STORAGE_KEY = "pi-web:sidebar-width";
+const RIGHT_PANEL_OPEN_STORAGE_KEY = "pi-web:right-panel-open";
+const RIGHT_PANEL_WIDTH_STORAGE_KEY = "pi-web:right-panel-width";
+const EXPLORER_WIDTH_STORAGE_KEY = "pi-web:explorer-width";
 
 export function AppShell() {
   const router = useRouter();
@@ -60,14 +64,24 @@ export function AppShell() {
   const [projectTrustBusy, setProjectTrustBusy] = useState(false);
   const [projectTrustError, setProjectTrustError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
+  const [sidebarResizing, setSidebarResizing] = useState(false);
+  const lastExpandedSidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
   // On mobile the sidebar is an overlay drawer; hide it by default so the chat
   // is visible on load. Runs once the breakpoint resolves after hydration.
   useEffect(() => {
     if (isMobile) setSidebarOpen(false);
   }, [isMobile]);
-  useEffect(() => {
-    setMobileSidebarReady(true);
+  useLayoutEffect(() => {
+    const storedWidth = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
+    if (Number.isFinite(storedWidth) && storedWidth >= SIDEBAR_MIN_WIDTH && storedWidth <= SIDEBAR_MAX_WIDTH) {
+      setSidebarWidth(storedWidth);
+      lastExpandedSidebarWidthRef.current = storedWidth;
+      document.documentElement.style.setProperty("--saved-sidebar-width", `${storedWidth}px`);
+    }
+    const frame = window.requestAnimationFrame(() => setMobileSidebarReady(true));
+    return () => window.cancelAnimationFrame(frame);
   }, []);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
@@ -97,10 +111,6 @@ export function AppShell() {
 
   // Session stats (tokens + cost) — populated by ChatWindow, displayed in top bar
   const [sessionStats, setSessionStats] = useState<SessionStatsInfo | null>(null);
-  const [autoNameStatus, setAutoNameStatus] = useState<AutoNameStatus>({ kind: "idle" });
-  const autoNameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const activeSessionIdRef = useRef<string | null>(selectedSession?.id ?? null);
-  activeSessionIdRef.current = selectedSession?.id ?? null;
   const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
     setSessionStats(stats);
   }, []);
@@ -117,7 +127,6 @@ export function AppShell() {
   useEffect(() => {
     return () => {
       if (sessionCopyTimerRef.current) clearTimeout(sessionCopyTimerRef.current);
-      if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);
     };
   }, []);
 
@@ -144,6 +153,53 @@ export function AppShell() {
   const handleSidebarToggle = useCallback(() => {
     if (isMobile) setActiveTopPanel(null);
     setSidebarOpen((open) => !open);
+  }, [isMobile]);
+
+  const handleSidebarResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (isMobile) return;
+    event.preventDefault();
+    setSidebarResizing(true);
+    let pendingWidth = sidebarWidth;
+
+    const move = (pointerEvent: PointerEvent) => {
+      pendingWidth = Math.max(0, Math.min(SIDEBAR_MAX_WIDTH, pointerEvent.clientX));
+      setSidebarWidth(pendingWidth);
+      document.documentElement.style.setProperty("--saved-sidebar-width", `${pendingWidth}px`);
+    };
+    const stop = () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", stop);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      setSidebarResizing(false);
+
+      if (pendingWidth < SIDEBAR_COLLAPSE_THRESHOLD) {
+        setSidebarOpen(false);
+        setSidebarWidth(lastExpandedSidebarWidthRef.current);
+        document.documentElement.style.setProperty("--saved-sidebar-width", `${lastExpandedSidebarWidthRef.current}px`);
+        return;
+      }
+
+      const settledWidth = Math.max(SIDEBAR_MIN_WIDTH, pendingWidth);
+      setSidebarWidth(settledWidth);
+      lastExpandedSidebarWidthRef.current = settledWidth;
+      document.documentElement.style.setProperty("--saved-sidebar-width", `${settledWidth}px`);
+      window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(settledWidth));
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", stop);
+  }, [isMobile, sidebarWidth]);
+
+  const handleSidebarResizeReset = useCallback(() => {
+    if (isMobile) return;
+    setSidebarOpen(true);
+    setSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
+    lastExpandedSidebarWidthRef.current = SIDEBAR_DEFAULT_WIDTH;
+    document.documentElement.style.setProperty("--saved-sidebar-width", `${SIDEBAR_DEFAULT_WIDTH}px`);
+    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(SIDEBAR_DEFAULT_WIDTH));
   }, [isMobile]);
 
   useEffect(() => {
@@ -173,6 +229,16 @@ export function AppShell() {
   const [fileTabs, setFileTabs] = useState<Tab[]>([]);
   const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const [rightPanelPreferenceLoaded, setRightPanelPreferenceLoaded] = useState(false);
+  const [rightPanelWidth, setRightPanelWidth] = useState(560);
+  const [rightPanelResizing, setRightPanelResizing] = useState(false);
+  const [rightExplorerCollapsed, setRightExplorerCollapsed] = useState(false);
+  const [rightExplorerWidth, setRightExplorerWidth] = useState(230);
+  const [rightExplorerUploadBusy, setRightExplorerUploadBusy] = useState(false);
+  const [rightChangesCount, setRightChangesCount] = useState(0);
+  const [rightChangesCollapsed, setRightChangesCollapsed] = useState(true);
+  const rightExplorerRef = useRef<FileExplorerHandle>(null);
+  const rightWorkspaceRef = useRef<HTMLDivElement>(null);
 
   // Same @mention format as the chat input's @ autocomplete, so the agent's
   // read tool resolves it the same way (it strips the @ prefix).
@@ -192,6 +258,35 @@ export function AppShell() {
   const initialSessionId = initialNavigation.sessionId;
   const [activeCwd, setActiveCwd] = useState<string | null>(null);
   const activeProjectRootRef = useRef<string | null>(null);
+
+  useLayoutEffect(() => {
+    const stored = window.localStorage.getItem(RIGHT_PANEL_OPEN_STORAGE_KEY);
+    if (stored !== null) setRightPanelOpen(stored === "true");
+
+    const maxPanelWidth = Math.max(420, window.innerWidth - SIDEBAR_DEFAULT_WIDTH - 360);
+    const storedPanelValue = window.localStorage.getItem(RIGHT_PANEL_WIDTH_STORAGE_KEY);
+    const storedPanelWidth = Number(storedPanelValue);
+    const panelWidth = storedPanelValue !== null && Number.isFinite(storedPanelWidth)
+      ? Math.min(maxPanelWidth, Math.max(420, storedPanelWidth))
+      : Math.min(maxPanelWidth, 560);
+    setRightPanelWidth(panelWidth);
+    document.documentElement.style.setProperty("--saved-right-panel-width", `${panelWidth}px`);
+
+    const maxExplorerWidth = Math.max(170, panelWidth - 220);
+    const storedExplorerValue = window.localStorage.getItem(EXPLORER_WIDTH_STORAGE_KEY);
+    const storedExplorerWidth = Number(storedExplorerValue);
+    const explorerWidth = storedExplorerValue !== null && Number.isFinite(storedExplorerWidth)
+      ? Math.min(maxExplorerWidth, Math.max(170, storedExplorerWidth))
+      : Math.min(maxExplorerWidth, 230);
+    setRightExplorerWidth(explorerWidth);
+    document.documentElement.style.setProperty("--saved-explorer-width", `${explorerWidth}px`);
+    setRightPanelPreferenceLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!rightPanelPreferenceLoaded) return;
+    window.localStorage.setItem(RIGHT_PANEL_OPEN_STORAGE_KEY, String(rightPanelOpen));
+  }, [rightPanelOpen, rightPanelPreferenceLoaded]);
   // True once the initial ?session= URL param has been resolved (or confirmed absent)
   const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !initialSessionId);
   // Suppresses sessionKey bump in handleCwdChange during the initial URL restore
@@ -267,12 +362,9 @@ export function AppShell() {
     setActiveTopPanel(null);
     // File tabs are keyed by absolute path, so tabs opened in the previous
     // project would otherwise linger after switching to a different project.
-    // Reached only past the same-project early return above, so worktrees of
-    // one repo keep their open tabs. Mirror handleCloseFileTab and close the
-    // now-empty right panel.
+    // Keep the right workspace open: its Explorer now follows the new cwd.
     setFileTabs([]);
     setActiveFileTabId(null);
-    setRightPanelOpen(false);
     router.replace("/", { scroll: false });
   }, [router, selectedSession]);
 
@@ -329,7 +421,7 @@ export function AppShell() {
       .catch(() => {});
   }, []);
 
-  // Called by ChatWindow when a new session gets its real id from pi
+  // Called by ChatWindow when the first message creates the real pi session.
   const handleSessionCreated = useCallback((session: SessionInfo) => {
     setNewSessionCwd(null);
     setSelectedSession(session);
@@ -340,46 +432,6 @@ export function AppShell() {
 
   const handleAgentEnd = useCallback(() => {
     setRefreshKey((k) => k + 1);
-    setExplorerRefreshKey((k) => k + 1);
-  }, []);
-
-  const handleAutoName = useCallback(async () => {
-    const sessionId = selectedSession?.id;
-    if (!sessionId || autoNameStatus.kind === "naming") return;
-    if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);
-    setActiveTopPanel(null);
-    setAutoNameStatus({ kind: "naming" });
-
-    try {
-      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/auto-name`, {
-        method: "POST",
-      });
-      const body = (await response.json().catch(() => ({}))) as { title?: string; error?: string };
-      if (!response.ok || !body.title) {
-        throw new Error(body.error || `HTTP ${response.status}`);
-      }
-
-      const title = body.title.trim();
-      setRefreshKey((key) => key + 1);
-      if (activeSessionIdRef.current !== sessionId) return;
-      setSelectedSession((current) => current?.id === sessionId ? { ...current, name: title } : current);
-      setSessionStats((current) => current?.sessionId === sessionId ? { ...current, sessionName: title } : current);
-      setAutoNameStatus({ kind: "success" });
-      autoNameTimerRef.current = setTimeout(() => setAutoNameStatus({ kind: "idle" }), 1800);
-    } catch (error) {
-      if (activeSessionIdRef.current !== sessionId) return;
-      const message = error instanceof Error ? error.message : String(error);
-      setAutoNameStatus({ kind: "error", message });
-      autoNameTimerRef.current = setTimeout(() => setAutoNameStatus({ kind: "idle" }), 5000);
-    }
-  }, [autoNameStatus.kind, selectedSession?.id]);
-
-  useEffect(() => {
-    if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);
-    setAutoNameStatus({ kind: "idle" });
-  }, [selectedSession?.id]);
-
-  const handleExplorerRefresh = useCallback(() => {
     setExplorerRefreshKey((k) => k + 1);
   }, []);
 
@@ -455,17 +507,63 @@ export function AppShell() {
   }, [handleOpenFile, selectedSession?.id]);
 
   const handleCloseFileTab = useCallback((tabId: string) => {
-    setFileTabs((prev) => {
-      const next = prev.filter((t) => t.id !== tabId);
-      if (next.length === 0) setRightPanelOpen(false);
-      return next;
-    });
+    setFileTabs((prev) => prev.filter((tab) => tab.id !== tabId));
     setActiveFileTabId((cur) => {
       if (cur !== tabId) return cur;
-      const remaining = fileTabs.filter((t) => t.id !== tabId);
+      const remaining = fileTabs.filter((tab) => tab.id !== tabId);
       return remaining.length > 0 ? remaining[remaining.length - 1].id : null;
     });
   }, [fileTabs]);
+
+  const handleRightPanelResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setRightPanelResizing(true);
+    let pendingWidth = rightPanelWidth;
+    const move = (pointerEvent: PointerEvent) => {
+      const occupiedSidebarWidth = sidebarOpen && window.innerWidth > 640 ? sidebarWidth : 0;
+      const maxWidth = Math.max(420, window.innerWidth - occupiedSidebarWidth - 360);
+      pendingWidth = Math.max(420, Math.min(maxWidth, window.innerWidth - pointerEvent.clientX));
+      setRightPanelWidth(pendingWidth);
+      document.documentElement.style.setProperty("--saved-right-panel-width", `${pendingWidth}px`);
+    };
+    const stop = () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", stop);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      setRightPanelResizing(false);
+      window.localStorage.setItem(RIGHT_PANEL_WIDTH_STORAGE_KEY, String(pendingWidth));
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", stop);
+  }, [rightPanelWidth, sidebarOpen, sidebarWidth]);
+
+  const handleExplorerResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const workspace = rightWorkspaceRef.current;
+    if (!workspace) return;
+    event.preventDefault();
+    const bounds = workspace.getBoundingClientRect();
+    let pendingWidth = rightExplorerWidth;
+    const move = (pointerEvent: PointerEvent) => {
+      const available = Math.max(360, bounds.width);
+      pendingWidth = Math.max(170, Math.min(available - 220, bounds.right - pointerEvent.clientX));
+      setRightExplorerWidth(pendingWidth);
+      document.documentElement.style.setProperty("--saved-explorer-width", `${pendingWidth}px`);
+    };
+    const stop = () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", stop);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.localStorage.setItem(EXPLORER_WIDTH_STORAGE_KEY, String(pendingWidth));
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", stop);
+  }, [rightExplorerWidth]);
 
   const handleViewFullHistory = useCallback(() => {
     if (!selectedSession) return;
@@ -530,7 +628,7 @@ export function AppShell() {
 
   const activeFileTab = fileTabs.find((t) => t.id === activeFileTabId) ?? null;
   const activeCwdName = activeCwd ? getFileName(activeCwd) || activeCwd : null;
-  const windowTitle = activeCwdName ? `${activeCwdName} - Pi Web` : "Pi Web";
+  const windowTitle = activeCwdName ? `${activeCwdName} - weclio` : "weclio";
 
   useEffect(() => {
     const syncWindowTitle = () => {
@@ -556,11 +654,7 @@ export function AppShell() {
         onSessionDeleted={handleSessionDeleted}
         selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
         onCwdChange={handleCwdChange}
-        onOpenFile={handleOpenFile}
-        explorerRefreshKey={explorerRefreshKey}
-        onExplorerRefresh={handleExplorerRefresh}
-        onAtMention={handleAtMention}
-        onAtMentions={handleAtMentions}
+        onAgentClick={() => setModelsConfigOpen(true)}
       />
       <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
         {([
@@ -718,9 +812,9 @@ export function AppShell() {
 
       {/* Left sidebar */}
       <div
-        className={`sidebar-container${sidebarOpen ? " sidebar-open" : " sidebar-closed"}${mobileSidebarReady ? "" : " sidebar-mobile-pending"}`}
+        className={`sidebar-container${sidebarOpen ? " sidebar-open" : " sidebar-closed"}${sidebarResizing ? " is-resizing" : ""}${mobileSidebarReady ? "" : " sidebar-mobile-pending"}`}
         style={{
-          background: "var(--bg-panel)",
+          background: "var(--sidebar-bg)",
           borderRight: "1px solid var(--border)",
           display: "flex",
           flexDirection: "column",
@@ -729,6 +823,15 @@ export function AppShell() {
         }}
       >
         {sidebarContent}
+        <div
+          className="sidebar-resizer"
+          onPointerDown={handleSidebarResizeStart}
+          onDoubleClick={handleSidebarResizeReset}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          title="Drag to resize · Double-click to reset"
+        />
       </div>
 
       {/* Center: chat */}
@@ -928,78 +1031,6 @@ export function AppShell() {
                 </svg>
                  {!isMobile && <span>{translate("history.label")}</span>}
               </button>
-              {(() => {
-                const hasMessages = Boolean(
-                  selectedSession
-                  && (sessionStats?.userMessages ?? selectedSession.messageCount) > 0,
-                );
-                const disabled = !selectedSession || !hasMessages || autoNameStatus.kind === "naming";
-                const isSuccess = autoNameStatus.kind === "success";
-                const isError = autoNameStatus.kind === "error";
-                const label = autoNameStatus.kind === "naming"
-                   ? translate("title.generating")
-                    : isSuccess
-                    ? translate("title.updated")
-                    : isError
-                      ? translate("title.failed")
-                      : translate("title.generate");
-                const title = !selectedSession
-                   ? translate("title.unsaved")
-                   : !hasMessages
-                     ? translate("title.noMessages")
-                     : isError
-                       ? autoNameStatus.message
-                       : translate("title.generateSession");
-
-                return (
-                  <button
-                    type="button"
-                    onClick={() => void handleAutoName()}
-                    disabled={disabled}
-                    title={title}
-                    aria-label={label}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 6,
-                      height: "100%", padding: "0 12px",
-                      background: "none", border: "none",
-                      borderTop: "2px solid transparent",
-                      borderRight: "1px solid var(--border)",
-                      color: isError ? "#dc2626" : isSuccess ? "var(--accent)" : disabled ? "var(--text-dim)" : "var(--text-muted)",
-                      cursor: disabled ? "not-allowed" : "pointer",
-                      opacity: disabled && autoNameStatus.kind !== "naming" ? 0.45 : 1,
-                      flexShrink: 0, fontSize: 11, whiteSpace: "nowrap",
-                      transition: "color 0.1s, background 0.1s, opacity 0.1s",
-                    }}
-                    onMouseEnter={(e) => {
-                      if (disabled) return;
-                      e.currentTarget.style.color = isError ? "#dc2626" : "var(--text)";
-                      e.currentTarget.style.background = "var(--bg-hover)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.color = isError ? "#dc2626" : isSuccess ? "var(--accent)" : disabled ? "var(--text-dim)" : "var(--text-muted)";
-                      e.currentTarget.style.background = "none";
-                    }}
-                  >
-                    {autoNameStatus.kind === "naming" ? (
-                      <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.25" />
-                        <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                      </svg>
-                    ) : isSuccess ? (
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    ) : (
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <path d="m15 4 5 5L7 22l-5-5Z" />
-                        <path d="m14 5 5 5" />
-                        <path d="M6 4V2M5 3H3M19 19v3M17.5 20.5h3" />
-                      </svg>
-                    )}
-                    {!isMobile && <span>{label}</span>}
-                  </button>
-                );
-              })()}
               <BranchNavigator
                 tree={branchTree}
                 activeLeafId={branchActiveLeafId}
@@ -1445,9 +1476,9 @@ export function AppShell() {
         </div>
       </div>
 
-      {/* Right panel: file viewer — always mounted, width animated via CSS */}
+      {/* Right workspace: file viewer on the left, Explorer on the right. */}
       <div
-        className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}`}
+        className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}${rightPanelResizing ? " is-resizing" : ""}`}
         style={{
           display: "flex",
           flexDirection: "column",
@@ -1455,40 +1486,97 @@ export function AppShell() {
           background: "var(--bg)",
         }}
       >
-        {/* Right panel tab bar */}
-        <div style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: 36 }}>
-          <div style={{ flex: 1, overflow: "hidden" }}>
-            <TabBar
-              tabs={fileTabs}
-              activeTabId={activeFileTabId ?? ""}
-              onSelectTab={setActiveFileTabId}
-              onCloseTab={handleCloseFileTab}
-            />
-          </div>
-
+        <div className="right-panel-resizer" onPointerDown={handleRightPanelResizeStart} role="separator" aria-orientation="vertical" aria-label="Resize workspace" />
+        <div className="right-workspace-titlebar">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+          </svg>
+          <span className="right-workspace-project" title={activeCwd ?? undefined}>{activeCwdName ?? "Workspace"}</span>
+          {selectedSession?.worktreeBranch && <span className="right-workspace-branch">{selectedSession.worktreeBranch}</span>}
         </div>
 
-        {/* File content */}
-        <div style={{ flex: 1, overflow: "hidden" }}>
-          {activeFileTab?.filePath ? (
-            <FileViewer
-              filePath={activeFileTab.filePath}
-              cwd={activeCwd ?? undefined}
-              sourceSessionId={activeFileTab.sourceSessionId}
-              gitRefreshKey={explorerRefreshKey}
-              initialDisplayMode={activeFileTab.initialDisplayMode}
-              onMentionLines={rightPanelOpen ? handleFileLineMention : undefined}
-              onOpenFile={(filePath) => handleOpenFile(
-                filePath,
-                getFileName(filePath),
-                { sourceSessionId: activeFileTab.sourceSessionId },
+        <div ref={rightWorkspaceRef} className="right-workspace-body">
+          {rightPanelOpen && activeCwd ? (
+            <>
+              <section
+                className="right-explorer-pane"
+                style={{ width: rightExplorerCollapsed ? 33 : "var(--saved-explorer-width, 230px)", flex: "0 0 auto" }}
+              >
+                <div className="right-explorer-toolbar">
+                  <button type="button" className="right-workspace-icon" onClick={() => setRightExplorerCollapsed((value) => !value)} title={rightExplorerCollapsed ? "Expand Explorer" : "Collapse Explorer"} aria-expanded={!rightExplorerCollapsed}>
+                    <svg width="11" height="11" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ transform: rightExplorerCollapsed ? "rotate(180deg)" : "none", transition: "transform 120ms ease" }} aria-hidden="true"><polyline points="3 2 7 5 3 8" /></svg>
+                  </button>
+                  <span className="right-explorer-label">Files</span>
+                  {rightChangesCount > 0 && (
+                    <button type="button" className={`right-workspace-icon${rightChangesCollapsed ? "" : " is-active"}`} onClick={() => setRightChangesCollapsed((value) => !value)} title={`${rightChangesCount} changed files`} aria-pressed={!rightChangesCollapsed}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M3 12h6M15 12h6" /></svg>
+                    </button>
+                  )}
+                  <button type="button" className="right-workspace-icon" onClick={() => rightExplorerRef.current?.openUploadPicker()} disabled={rightExplorerUploadBusy} title="Upload files">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m17 8-5-5-5 5M12 3v12" /></svg>
+                  </button>
+                </div>
+                {!rightExplorerCollapsed && (
+                  <div className="right-explorer-tree">
+                    <FileExplorer
+                      ref={rightExplorerRef}
+                      cwd={activeCwd}
+                      onOpenFile={handleOpenFile}
+                      refreshKey={explorerRefreshKey}
+                      onAtMention={handleAtMention}
+                      onAtMentions={handleAtMentions}
+                      onUploadBusyChange={setRightExplorerUploadBusy}
+                      changesCollapsed={rightChangesCollapsed}
+                      onChangesCountChange={setRightChangesCount}
+                    />
+                  </div>
+                )}
+              </section>
+
+              {!rightExplorerCollapsed && (
+                <div className="right-workspace-resizer" onPointerDown={handleExplorerResizeStart} role="separator" aria-orientation="vertical" aria-label="Resize Explorer" />
               )}
-            />
-          ) : (
-            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
-               {translate("files.noneOpen")}
-            </div>
-          )}
+
+              <section className="right-file-pane">
+                <div className="right-file-tabs">
+                  {fileTabs.length > 0 ? (
+                    <TabBar
+                      tabs={fileTabs}
+                      activeTabId={activeFileTabId ?? ""}
+                      onSelectTab={setActiveFileTabId}
+                      onCloseTab={handleCloseFileTab}
+                    />
+                  ) : (
+                    <div className="right-empty-file-tab">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6" /></svg>
+                      <span>Open file</span>
+                    </div>
+                  )}
+                </div>
+                <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+                  {activeFileTab?.filePath ? (
+                    <FileViewer
+                      filePath={activeFileTab.filePath}
+                      cwd={activeCwd}
+                      sourceSessionId={activeFileTab.sourceSessionId}
+                      gitRefreshKey={explorerRefreshKey}
+                      initialDisplayMode={activeFileTab.initialDisplayMode}
+                      onMentionLines={rightPanelOpen ? handleFileLineMention : undefined}
+                      onOpenFile={(filePath) => handleOpenFile(filePath, getFileName(filePath), { sourceSessionId: activeFileTab.sourceSessionId })}
+                    />
+                  ) : (
+                    <div className="right-empty-file-view">
+                      <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /><path d="M7 5V3h5l2 2" /></svg>
+                      <strong>Open file</strong>
+                      <span>Select a file from the workspace tree</span>
+                    </div>
+                  )}
+                </div>
+              </section>
+            </>
+          ) : rightPanelOpen ? (
+            <div className="right-workspace-empty">Select a project to browse its files</div>
+          ) : null}
         </div>
       </div>
     </div>

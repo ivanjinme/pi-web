@@ -10,7 +10,7 @@ interface Props {
   messageRefs: RefObject<(HTMLDivElement | null)[]>;
 }
 
-const MINIMAP_WIDTH = 36;
+const MINIMAP_WIDTH = 64;
 
 function getMessagePreview(msg: AgentMessage | Partial<AgentMessage>): string {
   if (msg.role === "user") {
@@ -41,13 +41,6 @@ function getMessagePreview(msg: AgentMessage | Partial<AgentMessage>): string {
   return "";
 }
 
-function getNodeColor(msg: AgentMessage | Partial<AgentMessage>): { bg: string; border: string } {
-  if (msg.role === "user") {
-    return { bg: "rgba(37,99,235,0.18)", border: "rgba(37,99,235,0.7)" };
-  }
-  return { bg: "rgba(107,114,128,0.12)", border: "rgba(107,114,128,0.5)" };
-}
-
 function hasTextContent(msg: AgentMessage | Partial<AgentMessage>): boolean {
   if (msg.role === "user") return true;
   if (msg.role === "assistant") {
@@ -59,7 +52,6 @@ function hasTextContent(msg: AgentMessage | Partial<AgentMessage>): boolean {
 
 interface NodeInfo {
   topRatio: number;   // 0–1 within total scroll height
-  heightRatio: number;
   msg: AgentMessage | Partial<AgentMessage>;
   index: number;
 }
@@ -125,10 +117,8 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
           const elRect = el.getBoundingClientRect();
           const containerRect = scrollEl.getBoundingClientRect();
           const top = elRect.top - containerRect.top + scrollEl.scrollTop;
-          const h = elRect.height;
           newNodes.push({
             topRatio: top / totalH,
-            heightRatio: h / totalH,
             msg,
             index: newNodes.length,
           });
@@ -214,46 +204,40 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
 
 
 
-  // Compute collision-free tooltip positions for all nodes
-  const TOOLTIP_HEIGHT = 22;
-  const TOOLTIP_GAP = 2;
   const minimapHeightPx = containerRef.current?.clientHeight ?? 600;
-
-  const tooltipPositions = useMemo(() => {
-    if (!minimapHovered || nodes.length === 0) return [];
-    // Initial positions: centered on the dot
-    const positions = nodes.map((node) =>
-      Math.round(node.topRatio * minimapHeightPx - TOOLTIP_HEIGHT / 2)
-    );
-    // Iterative push-apart to resolve overlaps (top-to-bottom pass, then bottom-to-top)
-    for (let pass = 0; pass < 10; pass++) {
-      for (let i = 1; i < positions.length; i++) {
-        const minTop = positions[i - 1] + TOOLTIP_HEIGHT + TOOLTIP_GAP;
-        if (positions[i] < minTop) positions[i] = minTop;
-      }
-      for (let i = positions.length - 2; i >= 0; i--) {
-        const maxTop = positions[i + 1] - TOOLTIP_HEIGHT - TOOLTIP_GAP;
-        if (positions[i] > maxTop) positions[i] = maxTop;
-      }
-    }
-    // Clamp all to minimap bounds
-    for (let i = 0; i < positions.length; i++) {
-      positions[i] = Math.max(0, Math.min(minimapHeightPx - TOOLTIP_HEIGHT, positions[i]));
-    }
-    return positions;
-  }, [minimapHovered, nodes, minimapHeightPx]);
 
   if (!visible) return null;
 
-  const viewportBoxTop = scrollRatio * (1 - viewportRatio) * 100;
-  const viewportBoxHeight = viewportRatio * 100;
+  const viewportTopRatio = scrollRatio * (1 - viewportRatio);
 
-  // Find the node closest to the current mouse position
+  // Keep the marks in one centered, evenly spaced cluster. Their position in
+  // the document still drives navigation; only the visual rhythm is normalized.
+  const markPitch = nodes.length > 1
+    ? Math.min(10, Math.max(4, (minimapHeightPx - 24) / (nodes.length - 1)))
+    : 0;
+  const clusterHeight = markPitch * Math.max(0, nodes.length - 1);
+  const clusterTop = (minimapHeightPx - clusterHeight) / 2;
+  const displayRatioFor = (index: number) => (clusterTop + index * markPitch) / minimapHeightPx;
+
+  // Find the message closest to the pointer, then reveal one calm preview card.
   const nearestIndex = mouseYRatio !== null && nodes.length > 0
-    ? nodes.reduce((best, node) => {
-        return Math.abs(node.topRatio - mouseYRatio) < Math.abs(nodes[best].topRatio - mouseYRatio) ? node.index : best;
-      }, 0)
+    ? nodes.reduce((best, node) => (
+        Math.abs(displayRatioFor(node.index) - mouseYRatio)
+          < Math.abs(displayRatioFor(nodes[best].index) - mouseYRatio) ? node.index : best
+      ), 0)
     : null;
+  const currentIndex = nodes.length > 0
+    ? nodes.reduce((best, node) => (
+        Math.abs(node.topRatio - (viewportTopRatio + viewportRatio / 2))
+          < Math.abs(nodes[best].topRatio - (viewportTopRatio + viewportRatio / 2)) ? node.index : best
+      ), 0)
+    : null;
+  const activeIndex = nearestIndex ?? currentIndex;
+  const nearestNode = nearestIndex === null ? null : nodes.find((node) => node.index === nearestIndex) ?? null;
+  const nearestPreview = nearestNode ? getMessagePreview(nearestNode.msg) : "";
+  const previewTop = nearestNode
+    ? Math.max(12, Math.min(minimapHeightPx - 132, clusterTop + nearestNode.index * markPitch - 46))
+    : 12;
 
   return (
     <div
@@ -261,138 +245,52 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
       onMouseDown={handleMouseDown}
       onMouseEnter={() => setMinimapHovered(true)}
       onMouseLeave={() => { setMinimapHovered(false); setMouseYRatio(null); }}
-      onMouseMove={(e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        setMouseYRatio((e.clientY - rect.top) / rect.height);
+      onMouseMove={(event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        setMouseYRatio((event.clientY - rect.top) / rect.height);
       }}
-      style={{
-        width: MINIMAP_WIDTH,
-        flexShrink: 0,
-        position: "relative",
-        cursor: "default",
-        userSelect: "none",
-        borderLeft: "1px solid var(--border)",
-        background: "var(--bg-panel)",
-        overflow: "visible",
-      }}
+      className="chat-history-rail"
+      style={{ width: MINIMAP_WIDTH }}
+      role="navigation"
+      aria-label="Chat history navigator"
     >
-      {/* Viewport indicator */}
-      <div
-        style={{
-          position: "absolute",
-          left: 0,
-          right: 0,
-          top: `${viewportBoxTop}%`,
-          height: `${viewportBoxHeight}%`,
-          background: "rgba(100,100,100,0.1)",
-          borderTop: "1px solid rgba(100,100,100,0.2)",
-          borderBottom: "1px solid rgba(100,100,100,0.2)",
-          pointerEvents: "none",
-          zIndex: 1,
-        }}
-      />
-
-      {/* Message nodes */}
       {nodes.map((node) => {
-        const color = getNodeColor(node.msg);
-        const isNearest = minimapHovered && nearestIndex === node.index;
-        const isUser = node.msg.role === "user";
-        const dotTop = node.topRatio * 100;
+        const isNearest = activeIndex === node.index;
+        const inViewport = node.topRatio >= viewportTopRatio && node.topRatio <= viewportTopRatio + viewportRatio;
+        const distance = nearestIndex === null ? Number.POSITIVE_INFINITY : Math.abs(node.index - nearestIndex);
+        const wave = distance < 5 ? (1 + Math.cos(Math.PI * distance / 5)) / 2 : 0;
+        const width = minimapHovered ? Math.round(8 + 26 * wave) : 8;
 
         return (
-          <div
+          <button
             key={node.index}
-
-            style={{
-              position: "absolute",
-              top: `${dotTop}%`,
-              transform: "translateY(-50%)",
-              left: 0,
-              right: 0,
-              height: "12px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-              zIndex: 2,
-            }}
+            type="button"
+            className="chat-history-rail-hit"
+            style={{ top: clusterTop + node.index * markPitch }}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={() => scrollToMinimapRatio(node.topRatio - viewportRatio / 2)}
+            aria-label={`Go to ${node.msg.role === "user" ? "your" : "assistant"} message ${node.index + 1}`}
           >
-            {/* Dot */}
             <div
-              style={{
-                width: isUser ? 8 : 6,
-                height: isUser ? 8 : 6,
-                borderRadius: isUser ? 2 : "50%",
-                background: color.bg,
-                border: `1.5px solid ${color.border}`,
-                flexShrink: 0,
-                transition: "transform 0.1s",
-                transform: isNearest ? "scale(1.6)" : "scale(1)",
-              }}
+              className={`chat-history-rail-mark${isNearest ? " is-nearest" : ""}${inViewport ? " is-visible" : ""}`}
+              style={{ width }}
             />
-
-
-          </div>
+          </button>
         );
       })}
 
-      {/* Center line */}
-      <div
-        style={{
-          position: "absolute",
-          left: "50%",
-          top: 0,
-          bottom: 0,
-          width: 1,
-          background: "var(--border)",
-          transform: "translateX(-50%)",
-          zIndex: 0,
-        }}
-      />
-
-      {/* Tooltips for all nodes, collision-free positions */}
-      {minimapHovered && nodes.map((node, i) => {
-        const preview = getMessagePreview(node.msg);
-        const color = getNodeColor(node.msg);
-        const isNearest = nearestIndex === node.index;
-        if (!preview || tooltipPositions.length === 0) return null;
-        return (
-          <div
-            key={node.index}
-            style={{
-              position: "absolute",
-              top: tooltipPositions[i],
-              right: "100%",
-              marginRight: 6,
-              background: "var(--bg)",
-              borderTop: `1px solid ${isNearest ? color.border : "var(--border)"}`,
-              borderRight: `1px solid ${isNearest ? color.border : "var(--border)"}`,
-              borderBottom: `1px solid ${isNearest ? color.border : "var(--border)"}`,
-              borderLeft: `2px solid ${color.border}`,
-              borderRadius: 4,
-              padding: "2px 7px",
-              width: 200,
-              zIndex: 100,
-              pointerEvents: "none",
-              opacity: isNearest ? 1 : 0.45,
-              transition: "top 0.1s, opacity 0.1s",
-            }}
-          >
-            <div
-              style={{
-                fontSize: 11,
-                color: isNearest ? "var(--text)" : "var(--text-muted)",
-                lineHeight: 1.4,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {preview}
-            </div>
+      {minimapHovered && nearestNode && nearestPreview && (
+        <div
+          className="chat-history-preview"
+          style={{ top: previewTop }}
+          aria-hidden="true"
+        >
+          <div className="chat-history-preview-role">
+            {nearestNode.msg.role === "user" ? "You" : "Assistant"}
           </div>
-        );
-      })}
+          <div className="chat-history-preview-copy">{nearestPreview}</div>
+        </div>
+      )}
     </div>
   );
 }
