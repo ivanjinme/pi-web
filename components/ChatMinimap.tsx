@@ -10,8 +10,6 @@ interface Props {
   messageRefs: RefObject<(HTMLDivElement | null)[]>;
 }
 
-const MINIMAP_WIDTH = 64;
-
 function getMessagePreview(msg: AgentMessage | Partial<AgentMessage>): string {
   if (msg.role === "user") {
     const content = msg.content;
@@ -250,7 +248,6 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
         setMouseYRatio((event.clientY - rect.top) / rect.height);
       }}
       className="chat-history-rail"
-      style={{ width: MINIMAP_WIDTH }}
       role="navigation"
       aria-label="Chat history navigator"
     >

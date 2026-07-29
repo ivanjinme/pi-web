@@ -1242,14 +1242,41 @@ span.linenumber {
 }
 
 
-/* Chat history navigator: a quiet left-hand rhythm rail. */
+/* Messages, editor widgets, and the composer share one responsive column. */
+.chat-content-gutter {
+  padding-inline: 24px;
+}
+
+.chat-content-column {
+  width: 100%;
+  max-width: 720px;
+  margin-inline: auto;
+}
+
+/* The conversation column centers independently of the history rail. The rail
+   stays on the chat area's left edge and disappears before it can overlap the
+   centered 720px conversation column. */
+.chat-conversation-region {
+  container-type: inline-size;
+}
+
 .chat-history-rail {
-  position: relative;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
   z-index: 5;
-  flex-shrink: 0;
+  width: 64px;
   overflow: visible;
   cursor: default;
   user-select: none;
+}
+
+/* 720px content + 64px clear space on each side, minus the boundary pixel. */
+@container (max-width: 847px) {
+  .chat-history-rail {
+    display: none;
+  }
 }
 
 .chat-history-rail-hit {
@@ -1574,7 +1601,8 @@ span.linenumber {
   }
   .right-panel-container.right-panel-open {
     width: var(--saved-right-panel-width, 560px);
-    min-width: 420px;
+    /* Keep in sync with RIGHT_PANEL_MIN_WIDTH in AppShell.tsx. */
+    min-width: 320px;
     max-width: calc(100vw - 360px);
   }
   .right-panel-container.right-panel-closed {

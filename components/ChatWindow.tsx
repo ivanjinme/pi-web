@@ -52,10 +52,6 @@ function phaseLabel(phase: AgentPhase, t: (key: string, params?: Record<string, 
   return t("chat.thinking");
 }
 
-const CHAT_MINIMAP_WIDTH = 64;
-const CHAT_COLUMN_PADDING = 16;
-const CHAT_INPUT_LEFT_PADDING = CHAT_COLUMN_PADDING + CHAT_MINIMAP_WIDTH;
-
 function hasFinalAssistantAnswer(message: AgentMessage): boolean {
   if (message.role !== "assistant") return false;
   return splitFinalAssistantBlocks(message as AssistantMessage).answerBlocks.some((block) => (
@@ -446,8 +442,8 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       )}
 
       {isEmptyNew ? (
-        <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
-          <div className="w-full max-w-[820px]">
+        <div className="chat-content-gutter flex flex-1 flex-col items-center justify-center overflow-y-auto py-8">
+          <div className="chat-content-column">
             <div
               className="mb-3"
               style={{
@@ -478,19 +474,19 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
         </div>
       ) : (
       <>
-      <div className="relative flex flex-1 overflow-hidden">
+      <div className="chat-conversation-region relative flex flex-1 overflow-hidden">
         <div
+          className="chat-content-gutter"
           style={{
             position: "absolute",
             top: 12,
-            left: isMobile ? 0 : CHAT_MINIMAP_WIDTH,
+            left: 0,
             right: 0,
             zIndex: 40,
-            padding: `0 ${CHAT_COLUMN_PADDING}px`,
             pointerEvents: "none",
           }}
         >
-          <div style={{ maxWidth: 820, margin: "0 auto" }}>
+          <div className="chat-content-column">
             <NoticeShelf notices={notices} floating align="right" />
           </div>
         </div>
@@ -503,8 +499,8 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
           />
         )}
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto pt-4 [scrollbar-width:none]">
-          <div style={{ padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
-            <div style={{ maxWidth: 820, margin: "0 auto" }}>
+          <div className="chat-content-gutter">
+            <div className="chat-content-column">
               <ExtensionWidgets widgets={aboveEditorWidgets} />
 
             {(() => {
@@ -725,13 +721,8 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       </div>
 
       <div className="relative">
-        <div
-          style={{
-            padding: `0 ${CHAT_COLUMN_PADDING}px`,
-            paddingLeft: isMobile ? CHAT_COLUMN_PADDING : CHAT_INPUT_LEFT_PADDING,
-          }}
-        >
-          <div style={{ maxWidth: 820, margin: "0 auto" }}>
+        <div className="chat-content-gutter">
+          <div className="chat-content-column">
             <ExtensionWidgets widgets={belowEditorWidgets} />
           </div>
         </div>

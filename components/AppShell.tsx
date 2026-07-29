@@ -36,6 +36,7 @@ const SIDEBAR_COLLAPSE_THRESHOLD = 180;
 const SIDEBAR_WIDTH_STORAGE_KEY = "pi-web:sidebar-width";
 const RIGHT_PANEL_OPEN_STORAGE_KEY = "pi-web:right-panel-open";
 const RIGHT_PANEL_WIDTH_STORAGE_KEY = "pi-web:right-panel-width";
+const RIGHT_PANEL_MIN_WIDTH = 320;
 const EXPLORER_WIDTH_STORAGE_KEY = "pi-web:explorer-width";
 
 export function AppShell() {
@@ -263,11 +264,11 @@ export function AppShell() {
     const stored = window.localStorage.getItem(RIGHT_PANEL_OPEN_STORAGE_KEY);
     if (stored !== null) setRightPanelOpen(stored === "true");
 
-    const maxPanelWidth = Math.max(420, window.innerWidth - SIDEBAR_DEFAULT_WIDTH - 360);
+    const maxPanelWidth = Math.max(RIGHT_PANEL_MIN_WIDTH, window.innerWidth - SIDEBAR_DEFAULT_WIDTH - 360);
     const storedPanelValue = window.localStorage.getItem(RIGHT_PANEL_WIDTH_STORAGE_KEY);
     const storedPanelWidth = Number(storedPanelValue);
     const panelWidth = storedPanelValue !== null && Number.isFinite(storedPanelWidth)
-      ? Math.min(maxPanelWidth, Math.max(420, storedPanelWidth))
+      ? Math.min(maxPanelWidth, Math.max(RIGHT_PANEL_MIN_WIDTH, storedPanelWidth))
       : Math.min(maxPanelWidth, 560);
     setRightPanelWidth(panelWidth);
     document.documentElement.style.setProperty("--saved-right-panel-width", `${panelWidth}px`);
@@ -521,8 +522,8 @@ export function AppShell() {
     let pendingWidth = rightPanelWidth;
     const move = (pointerEvent: PointerEvent) => {
       const occupiedSidebarWidth = sidebarOpen && window.innerWidth > 640 ? sidebarWidth : 0;
-      const maxWidth = Math.max(420, window.innerWidth - occupiedSidebarWidth - 360);
-      pendingWidth = Math.max(420, Math.min(maxWidth, window.innerWidth - pointerEvent.clientX));
+      const maxWidth = Math.max(RIGHT_PANEL_MIN_WIDTH, window.innerWidth - occupiedSidebarWidth - 360);
+      pendingWidth = Math.max(RIGHT_PANEL_MIN_WIDTH, Math.min(maxWidth, window.innerWidth - pointerEvent.clientX));
       setRightPanelWidth(pendingWidth);
       document.documentElement.style.setProperty("--saved-right-panel-width", `${pendingWidth}px`);
     };
