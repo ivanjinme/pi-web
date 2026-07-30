@@ -19,6 +19,8 @@ export interface SessionEntryBase {
 export interface TextContent {
   type: "text";
   text: string;
+  /** Provider metadata used to distinguish progress commentary from the final answer. */
+  textSignature?: string;
 }
 
 export interface ImageContent {

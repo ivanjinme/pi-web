@@ -5,7 +5,7 @@ import { MarkdownBody } from "./MarkdownBody";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
-import { isEmptyThinkingBlock } from "@/lib/message-display";
+import { getTextPhase, isEmptyThinkingBlock } from "@/lib/message-display";
 import { parseUnifiedPatch, type SplitDiffCell } from "@/lib/patch";
 import type {
   AgentMessage,
@@ -53,6 +53,17 @@ function loadThinkingContent(sessionId: string, entryId: string, blockIndex: num
   return request;
 }
 
+interface EditableImage {
+  data: string;
+  mimeType: string;
+}
+
+type EditFromHereHandler = (
+  targetId: string,
+  content: string,
+  images?: EditableImage[],
+) => Promise<void>;
+
 interface Props {
   message: AgentMessage;
   isStreaming?: boolean;
@@ -63,9 +74,7 @@ interface Props {
   entryId?: string;
   onFork?: (entryId: string) => void;
   forking?: boolean;
-  onNavigate?: (entryId: string) => void;
-  prevAssistantEntryId?: string;
-  onEditContent?: (content: string) => void;
+  onEditFromHere?: EditFromHereHandler;
   showTimestamp?: boolean;
   prevTimestamp?: number;
   sessionId?: string;
@@ -98,12 +107,12 @@ function haveSameRelevantToolResults(
   return true;
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, sessionId }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, entryId, onFork, forking, onEditFromHere, showTimestamp, prevTimestamp, sessionId }: Props) {
   if (message.role === "user") {
-    return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} prevAssistantEntryId={prevAssistantEntryId} onEditContent={onEditContent} />;
+    return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onEditFromHere={onEditFromHere} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -129,45 +138,40 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.entryId === next.entryId
     && prev.onFork === next.onFork
     && prev.forking === next.forking
-    && prev.onNavigate === next.onNavigate
-    && prev.prevAssistantEntryId === next.prevAssistantEntryId
-    && prev.onEditContent === next.onEditContent
+    && prev.onEditFromHere === next.onEditFromHere
     && prev.showTimestamp === next.showTimestamp
     && prev.prevTimestamp === next.prevTimestamp
     && prev.sessionId === next.sessionId;
 });
 
-function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent }: {
+function UserMessageView({ message, cwd, onOpenFile, entryId, onEditFromHere }: {
   message: UserMessage;
   cwd?: string;
   onOpenFile?: (filePath: string) => void;
   entryId?: string;
-  onFork?: (entryId: string) => void;
-  forking?: boolean;
-  onNavigate?: (entryId: string) => void;
-  prevAssistantEntryId?: string;
-  onEditContent?: (content: string) => void;
+  onEditFromHere?: Props["onEditFromHere"];
 }) {
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [submittingEdit, setSubmittingEdit] = useState(false);
+  const editRef = useRef<HTMLTextAreaElement>(null);
 
-  const content =
-    typeof message.content === "string"
-      ? message.content
-      : message.content
-          .filter((b): b is TextContent => b.type === "text")
-          .map((b) => b.text)
-          .join("\n");
-
-  const imageBlocks: ImageContent[] =
-    typeof message.content === "string"
-      ? []
-      : message.content.filter((b): b is ImageContent => b.type === "image");
+  const content = getMessageText(message.content);
+  const imageBlocks = getMessageImages(message.content);
 
   const time = formatTime(message.timestamp);
-  const canFork = !!entryId && !!onFork;
-  const canNavigate = !!prevAssistantEntryId && !!onNavigate;
+  const canEdit = !!entryId && !!onEditFromHere;
+
+  useEffect(() => {
+    if (!editing || !editRef.current) return;
+    editRef.current.focus();
+    const end = editRef.current.value.length;
+    editRef.current.setSelectionRange(end, end);
+  }, [editing]);
 
   const copyContent = () => {
     copyText(content).then(() => {
@@ -176,13 +180,48 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
     });
   };
 
+  const beginEdit = () => {
+    setEditDraft(content);
+    setEditError(null);
+    setEditing(true);
+  };
+
+  const cancelEdit = () => {
+    if (submittingEdit) return;
+    setEditing(false);
+    setEditError(null);
+  };
+
+  const submitEdit = async () => {
+    if (!entryId || !onEditFromHere || submittingEdit || !editDraft.trim()) return;
+    setSubmittingEdit(true);
+    setEditError(null);
+    try {
+      const images = imageBlocks
+        .map(editableImage)
+        .filter((image): image is EditableImage => image !== null);
+      await onEditFromHere(entryId, editDraft, images.length ? images : undefined);
+      setEditing(false);
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSubmittingEdit(false);
+    }
+  };
+
   return (
     <div
       style={{ marginBottom: 16, display: "flex", flexDirection: "column", alignItems: "flex-end" }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 6, maxWidth: "85%" }}>
+      <div style={{
+        display: "flex",
+        alignItems: "flex-end",
+        gap: 6,
+        width: editing ? "100%" : undefined,
+        maxWidth: editing ? "100%" : "85%",
+      }}>
         <div
           style={{
             flex: 1,
@@ -200,16 +239,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
           {imageBlocks.length > 0 && (
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: content ? 8 : 0 }}>
               {imageBlocks.map((img, i) => {
-                // lib/types.ts ImageContent uses {source:{type,data,media_type,url}}
-                // pi-ai on-disk format uses flat {data, mimeType} — handle both
-                const flat = img as unknown as { data?: string; mimeType?: string };
-                const src = img.source
-                  ? img.source.type === "base64"
-                    ? `data:${img.source.media_type};base64,${img.source.data}`
-                    : img.source.url ?? ""
-                  : flat.data
-                    ? `data:${flat.mimeType};base64,${flat.data}`
-                    : "";
+                const src = imageSource(img);
                 return (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -222,26 +252,65 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
               })}
             </div>
           )}
-          {content && <MarkdownBody className="markdown-user-message" cwd={cwd} onOpenFile={onOpenFile}>{content}</MarkdownBody>}
+          {editing ? (
+            <>
+              <textarea
+                ref={editRef}
+                value={editDraft}
+                disabled={submittingEdit}
+                aria-label={t("i18n.editFromHere")}
+                onChange={(event) => setEditDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") cancelEdit();
+                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                    event.preventDefault();
+                    void submitEdit();
+                  }
+                }}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  minWidth: 0,
+                  minHeight: 96,
+                  padding: 0,
+                  resize: "vertical",
+                  border: "none",
+                  outline: "none",
+                  background: "transparent",
+                  color: "var(--text)",
+                  font: "inherit",
+                  lineHeight: 1.6,
+                }}
+              />
+              {editError && <div style={{ marginTop: 6, color: "#ef4444", fontSize: 11 }}>{editError}</div>}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 8 }}>
+                <button type="button" onClick={cancelEdit} disabled={submittingEdit} className="message-edit-button">
+                  {t("chat.cancel")}
+                </button>
+                <button type="button" onClick={() => void submitEdit()} disabled={submittingEdit || !editDraft.trim()} className="message-edit-button is-primary">
+                  {t("chat.send")}
+                </button>
+              </div>
+            </>
+          ) : content ? (
+            <MarkdownBody className="markdown-user-message" cwd={cwd} onOpenFile={onOpenFile}>{content}</MarkdownBody>
+          ) : null}
         </div>
 
       </div>
 
       {/* Bottom row: action buttons + timestamp */}
-      {(time || canFork || canNavigate || true) && (
+      {!editing && (
         <div style={{
           display: "flex", alignItems: "center", justifyContent: "flex-end",
           gap: 6, marginTop: 3,
+          opacity: hovered ? 1 : 0,
+          pointerEvents: hovered ? "auto" : "none",
+          transition: "opacity 0.12s",
         }}>
-          <div style={{
-            display: "flex", gap: 3,
-            opacity: hovered ? 1 : 0,
-            pointerEvents: hovered ? "auto" : "none",
-            transition: "opacity 0.12s",
-          }}>
+          <div style={{ display: "flex", gap: 3 }}>
             <button
               onClick={copyContent}
-               title={t("i18n.copyMessage")}
               style={{
                 display: "flex", alignItems: "center", gap: 4,
                 padding: "3px 8px", height: 22,
@@ -269,67 +338,29 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                {copied ? t("i18n.copied") : t("i18n.copy")}
             </button>
           </div>
-          {(canFork || canNavigate) && (
-            <div style={{
-              display: "flex", gap: 3,
-              opacity: (hovered || forking) ? 1 : 0,
-              pointerEvents: (hovered || forking) ? "auto" : "none",
-              transition: "opacity 0.12s",
-            }}>
-              {canNavigate && (
-                <button
-                  onClick={() => { onNavigate!(prevAssistantEntryId!); onEditContent?.(content); }}
-                   title={t("i18n.editFromHereTitle")}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 4,
-                    padding: "3px 8px", height: 22,
-                    background: "none", border: "none",
-                    borderRadius: 5,
-                    color: "var(--text-dim)",
-                    cursor: "pointer",
-                    fontSize: 11, fontWeight: 400,
-                    whiteSpace: "nowrap",
-                    transition: "color 0.12s",
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
-                >
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="15 10 20 15 15 20" />
-                    <path d="M4 4v7a4 4 0 0 0 4 4h12" />
-                  </svg>
-                   {t("i18n.editFromHere")}
-                </button>
-              )}
-              {canFork && (
-                <button
-                  onClick={() => { onFork!(entryId!); }}
-                  disabled={forking}
-                   title={forking ? t("i18n.creatingSession") : t("i18n.newSessionTitle")}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 4,
-                    padding: "3px 8px", height: 22,
-                    background: "none", border: "none",
-                    borderRadius: 5,
-                    color: forking ? "var(--accent)" : "var(--text-dim)",
-                    cursor: forking ? "not-allowed" : "pointer",
-                    fontSize: 11, fontWeight: 400,
-                    whiteSpace: "nowrap",
-                    transition: "color 0.12s",
-                  }}
-                  onMouseEnter={(e) => { if (!forking) e.currentTarget.style.color = "var(--accent)"; }}
-                  onMouseLeave={(e) => { if (!forking) e.currentTarget.style.color = "var(--text-dim)"; }}
-                >
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="6" y1="3" x2="6" y2="15" />
-                    <circle cx="18" cy="6" r="3" />
-                    <circle cx="6" cy="18" r="3" />
-                    <path d="M18 9a9 9 0 0 1-9 9" />
-                  </svg>
-                   {forking ? t("i18n.creating") : t("i18n.newSession")}
-                </button>
-              )}
-            </div>
+          {canEdit && (
+            <button
+              onClick={beginEdit}
+              style={{
+                display: "flex", alignItems: "center", gap: 4,
+                padding: "3px 8px", height: 22,
+                background: "none", border: "none",
+                borderRadius: 5,
+                color: "var(--text-dim)",
+                cursor: "pointer",
+                fontSize: 11, fontWeight: 400,
+                whiteSpace: "nowrap",
+                transition: "color 0.12s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="15 10 20 15 15 20" />
+                <path d="M4 4v7a4 4 0 0 0 4 4h12" />
+              </svg>
+              {t("i18n.editFromHere")}
+            </button>
           )}
           {time && <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{time}</span>}
         </div>
@@ -345,10 +376,12 @@ function AssistantMessageView({
   modelNames,
   cwd,
   onOpenFile,
+  entryId,
+  onFork,
+  forking,
   showTimestamp,
   prevTimestamp,
   sessionId,
-  entryId,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
@@ -356,10 +389,12 @@ function AssistantMessageView({
   modelNames?: Record<string, string>;
   cwd?: string;
   onOpenFile?: (filePath: string) => void;
+  entryId?: string;
+  onFork?: Props["onFork"];
+  forking?: boolean;
   showTimestamp?: boolean;
   prevTimestamp?: number;
   sessionId?: string;
-  entryId?: string;
 }) {
   const { t } = useI18n();
   const time = showTimestamp ? formatTime(message.timestamp) : null;
@@ -369,6 +404,9 @@ function AssistantMessageView({
   const blocks = blockItems.map(({ block }) => block);
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
+  const forkFromHere = !isStreaming && entryId && onFork
+    ? () => onFork(entryId)
+    : undefined;
   const streamStartRef = useRef<number | null>(null);
   const [tps, setTps] = useState<number | null>(null);
   const blockItemsRef = useRef(blockItems);
@@ -533,17 +571,14 @@ function AssistantMessageView({
       </div>
 
       <div style={{
-        display: "flex", alignItems: "center", gap: 8, marginTop: 4,
+        display: "flex", alignItems: "center", gap: 3, marginTop: 4,
+        opacity: (hovered || forking) ? 1 : 0,
+        pointerEvents: (hovered || forking) ? "auto" : "none",
+        transition: "opacity 0.12s",
       }}>
-        {message.usage && !isStreaming && (
-          <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
-            {formatUsage(message.usage)}
-          </div>
-        )}
         {textContent && !isStreaming && (
           <button
             onClick={copyContent}
-             title={t("i18n.copyMessage")}
             style={{
               display: "flex", alignItems: "center", gap: 4,
               padding: "3px 8px", height: 22,
@@ -553,9 +588,7 @@ function AssistantMessageView({
               cursor: "pointer",
               fontSize: 11, fontWeight: 400,
               whiteSpace: "nowrap",
-              opacity: hovered ? 1 : 0,
-              pointerEvents: hovered ? "auto" : "none",
-              transition: "opacity 0.12s, color 0.12s",
+              transition: "color 0.12s",
             }}
             onMouseEnter={(e) => { if (!copied) e.currentTarget.style.color = "var(--accent)"; }}
             onMouseLeave={(e) => { if (!copied) e.currentTarget.style.color = "var(--text-dim)"; }}
@@ -573,8 +606,35 @@ function AssistantMessageView({
              {copied ? t("i18n.copied") : t("i18n.copy")}
           </button>
         )}
+        {forkFromHere && (
+          <button
+            onClick={forkFromHere}
+            disabled={forking}
+            style={{
+              display: "flex", alignItems: "center", gap: 4,
+              padding: "3px 8px", height: 22,
+              background: "none", border: "none",
+              borderRadius: 5,
+              color: forking ? "var(--accent)" : "var(--text-dim)",
+              cursor: forking ? "not-allowed" : "pointer",
+              fontSize: 11, fontWeight: 400,
+              whiteSpace: "nowrap",
+              transition: "color 0.12s",
+            }}
+            onMouseEnter={(event) => { if (!forking) event.currentTarget.style.color = "var(--accent)"; }}
+            onMouseLeave={(event) => { if (!forking) event.currentTarget.style.color = "var(--text-dim)"; }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="6" y1="3" x2="6" y2="15" />
+              <circle cx="18" cy="6" r="3" />
+              <circle cx="6" cy="18" r="3" />
+              <path d="M18 9a9 9 0 0 1-9 9" />
+            </svg>
+            {forking ? t("i18n.creating") : t("i18n.newSession")}
+          </button>
+        )}
         {time && !isStreaming && (
-          <span style={{ fontSize: 10, color: "var(--text-dim)", marginLeft: "auto" }}>{time}</span>
+          <span style={{ fontSize: 10, color: "var(--text-dim)", marginLeft: 3 }}>{time}</span>
         )}
       </div>
     </div>
@@ -598,7 +658,12 @@ function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCal
 }
 
 function TextBlock({ block, isStreaming, cwd, onOpenFile }: { block: TextContent; isStreaming?: boolean; cwd?: string; onOpenFile?: (filePath: string) => void }) {
-  return <MarkdownBody isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>{block.text}</MarkdownBody>;
+  const className = getTextPhase(block) === "commentary" ? "markdown-commentary" : undefined;
+  return (
+    <MarkdownBody className={className} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>
+      {block.text}
+    </MarkdownBody>
+  );
 }
 
 function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
@@ -1317,14 +1382,20 @@ function getMessageImages(content: CustomMessage["content"] | UserMessage["conte
   return content.filter((b): b is ImageContent => b.type === "image");
 }
 
-function imageSource(img: ImageContent): string {
-  const flat = img as unknown as { data?: string; mimeType?: string };
-  if (img.source) {
-    return img.source.type === "base64"
-      ? `data:${img.source.media_type};base64,${img.source.data}`
-      : img.source.url ?? "";
+function editableImage(image: ImageContent): EditableImage | null {
+  if (image.source?.type === "base64" && image.source.data && image.source.media_type) {
+    return { data: image.source.data, mimeType: image.source.media_type };
   }
-  return flat.data ? `data:${flat.mimeType};base64,${flat.data}` : "";
+
+  const flat = image as unknown as { data?: string; mimeType?: string };
+  if (!flat.data || !flat.mimeType) return null;
+  return { data: flat.data, mimeType: flat.mimeType };
+}
+
+function imageSource(image: ImageContent): string {
+  if (image.source?.type === "url") return image.source.url ?? "";
+  const editable = editableImage(image);
+  return editable ? `data:${editable.mimeType};base64,${editable.data}` : "";
 }
 
 function safeJson(value: unknown): string {
@@ -1361,22 +1432,6 @@ function getToolPreview(block: ToolCallContent): string {
 
   const first = input[keys[0]];
   return String(first).slice(0, 120);
-}
-
-function formatUsage(usage: {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  cost: { total: number };
-}): string {
-  const parts = [];
-  if (usage.input) parts.push(`${usage.input.toLocaleString()} in`);
-  if (usage.output) parts.push(`${usage.output.toLocaleString()} out`);
-  if (usage.cacheRead) parts.push(`${usage.cacheRead.toLocaleString()} cache R`);
-  if (usage.cacheWrite) parts.push(`${usage.cacheWrite.toLocaleString()} cache W`);
-  if (usage.cost?.total) parts.push(`$${usage.cost.total.toFixed(4)}`);
-  return parts.join(" · ");
 }
 
 function BashExecutionView({ message, sessionId }: { message: BashExecutionMessage; sessionId?: string }) {

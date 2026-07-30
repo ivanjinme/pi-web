@@ -1182,6 +1182,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const result = await sendAgentCommand<{ cancelled?: boolean; newSessionId?: string }>(sid, {
         type: "fork",
         entryId,
+        includeEntry: true,
       });
       const { cancelled, newSessionId } = result ?? {};
       if (!cancelled && newSessionId) {
@@ -1194,14 +1195,30 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [onSessionForked]);
 
-  const handleNavigate = useCallback(async (entryId: string) => {
-    if (bashRunningRef.current) return;
+  const handleEditFromHere = useCallback(async (
+    entryId: string,
+    message: string,
+    images?: Array<{ data: string; mimeType: string }>,
+  ) => {
+    if (agentRunningRef.current || bashRunningRef.current) {
+      throw new Error("Wait for the current operation to finish before editing this message.");
+    }
     const sid = sessionIdRef.current;
-    if (!sid) return;
-    sendAgentCommand(sid, { type: "navigate_tree", targetId: entryId }).catch(() => {});
-    setActiveLeafId(entryId);
-    await loadContext(sid, entryId);
-  }, [loadContext]);
+    if (!sid) throw new Error("Session is unavailable.");
+
+    const result = await sendAgentCommand<{ cancelled?: boolean; targetId?: string }>(sid, {
+      type: "navigate_before",
+      entryId,
+    });
+    if (result?.cancelled || !result?.targetId) throw new Error("The edit was cancelled.");
+
+    setActiveLeafId(result.targetId);
+    await loadContext(sid, result.targetId);
+    await handleSend(message, images?.map((image) => ({
+      ...image,
+      previewUrl: `data:${image.mimeType};base64,${image.data}`,
+    })));
+  }, [handleSend, loadContext]);
 
   const handleLeafChange = useCallback(async (leafId: string | null) => {
     if (bashRunningRef.current) return;
@@ -1494,7 +1511,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     completionScrollAllowedRef.current = false;
   }, []);
 
-  // Load session on mount
+  // Existing-session switches remount ChatWindow in AppShell, so this effect
+  // only loads the session present at mount. A brand-new session is promoted
+  // in the same instance and keeps its optimistic message and live connection.
   useEffect(() => {
     if (session) {
       sessionIdRef.current = session.id;
@@ -1533,6 +1552,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       eventSourceRef.current?.close();
       eventSourceRef.current = null;
     };
+    // Session changes remount this hook via ChatWindow's key.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1640,7 +1660,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     sessionIdRef, eventSourceRef, messagesEndRef, scrollContainerRef,
     lastUserMsgRef, pendingScrollToUserRef, initialScrollDoneRef,
     // Actions
-    handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
+    handleSend, handleAbort, handleFork, handleEditFromHere, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
     handleRecallQueue,
     handleBuiltinSlashCommand,

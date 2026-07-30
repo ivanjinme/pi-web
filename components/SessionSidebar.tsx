@@ -1,6 +1,17 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useState,
+  useCallback,
+  useMemo,
+  useRef,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import type { SessionInfo } from "@/lib/types";
 import { useI18n } from "@/hooks/useI18n";
@@ -121,6 +132,55 @@ function PathLabel({ text, style }: { text: string; style?: CSSProperties }) {
 }
 
 const DROPDOWN_ANIMATION_MS = 140;
+const PROJECT_FOLDERS_STORAGE_KEY = "pi-web:project-folders";
+const PINNED_PROJECTS_STORAGE_KEY = "pi-web:pinned-projects";
+const PROJECT_LABELS_STORAGE_KEY = "pi-web:project-labels";
+
+function loadStringArray(key: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const value = JSON.parse(window.localStorage.getItem(key) ?? "[]") as unknown;
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveStringArray(key: string, values: string[]): void {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(values));
+  } catch {
+    // Ignore storage quota and privacy-mode errors.
+  }
+}
+
+function loadProjectLabels(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    const value = JSON.parse(window.localStorage.getItem(PROJECT_LABELS_STORAGE_KEY) ?? "{}") as unknown;
+    if (!value || Array.isArray(value) || typeof value !== "object") return {};
+
+    const labels: Record<string, string> = {};
+    for (const [path, label] of Object.entries(value)) {
+      if (typeof label === "string") labels[path] = label;
+    }
+    return labels;
+  } catch {
+    return {};
+  }
+}
+
+function saveProjectLabels(labels: Record<string, string>): void {
+  try {
+    window.localStorage.setItem(PROJECT_LABELS_STORAGE_KEY, JSON.stringify(labels));
+  } catch {
+    // Ignore storage quota and privacy-mode errors.
+  }
+}
+
+function projectDefaultLabel(path: string): string {
+  return path.replace(/\\/g, "/").split("/").filter(Boolean).at(-1) || path;
+}
 
 function SidebarMoreMenu({ label, children }: { label: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -134,7 +194,7 @@ function SidebarMoreMenu({ label, children }: { label: string; children: ReactNo
       const rect = event.currentTarget.getBoundingClientRect();
       setPosition({
         top: Math.min(rect.bottom + 4, window.innerHeight - 116),
-        left: Math.max(8, Math.min(rect.right - 156, window.innerWidth - 164)),
+        left: Math.max(8, Math.min(rect.right - 124, window.innerWidth - 132)),
       });
     }
     setOpen((value) => !value);
@@ -167,7 +227,6 @@ function SidebarMoreMenu({ label, children }: { label: string; children: ReactNo
         type="button"
         className="sidebar-more-trigger"
         onClick={toggle}
-        title={label}
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -189,6 +248,111 @@ function SidebarMoreMenu({ label, children }: { label: string; children: ReactNo
         document.body,
       )}
     </div>
+  );
+}
+
+function FolderIcon({ size }: { size: number }): ReactNode {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+    </svg>
+  );
+}
+
+interface ProjectEditDialogProps {
+  root: string;
+  initialName: string;
+  onCancel: () => void;
+  onSave: (previousRoot: string, nextRoot: string, name: string) => void;
+}
+
+function ProjectEditDialog({ root, initialName, onCancel, onSave }: ProjectEditDialogProps) {
+  const [name, setName] = useState(initialName);
+  const [path, setPath] = useState(root);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = useCallback(async () => {
+    const candidate = path.trim();
+    if (!candidate || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/cwd/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd: candidate }),
+      });
+      const data = await response.json().catch(() => ({})) as { cwd?: string; error?: string };
+      if (!response.ok || data.error) {
+        setError(data.error ?? `HTTP ${response.status}`);
+        return;
+      }
+      const nextRoot = data.cwd ?? candidate;
+      onSave(root, nextRoot, name.trim() || projectDefaultLabel(nextRoot));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, name, onSave, path, root]);
+
+  function closeOnBackdrop(event: ReactMouseEvent<HTMLDivElement>): void {
+    if (event.target === event.currentTarget && !busy) onCancel();
+  }
+
+  function closeOnEscape(event: ReactKeyboardEvent<HTMLDivElement>): void {
+    if (event.key === "Escape" && !busy && !pickerOpen) onCancel();
+  }
+
+  function selectFolder(nextPath: string): void {
+    setPath(nextPath);
+    setPickerOpen(false);
+    setError(null);
+  }
+
+  return createPortal(
+    <div
+      className="project-editor-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="project-editor-title"
+      onMouseDown={closeOnBackdrop}
+      onKeyDown={closeOnEscape}
+    >
+      <div className="project-editor-panel">
+        <header className="project-editor-header">
+          <h2 id="project-editor-title">Edit project</h2>
+          <button type="button" onClick={onCancel} disabled={busy} aria-label="Close">×</button>
+        </header>
+        <div className="project-editor-body">
+          <label className="project-editor-name">
+            <span className="project-editor-folder-icon"><FolderIcon size={20} /></span>
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder={projectDefaultLabel(path)}
+              autoFocus
+            />
+          </label>
+          <h3>Source folder</h3>
+          <div className="project-editor-source">
+            <div><FolderIcon size={20} /><span>{path}</span></div>
+            <button type="button" onClick={() => setPickerOpen(true)}>Change folder</button>
+          </div>
+          {error && <div className="project-editor-error">{error}</div>}
+        </div>
+        <footer className="project-editor-footer">
+          <button type="button" className="is-secondary" onClick={onCancel} disabled={busy}>Cancel</button>
+          <button type="button" className="is-primary" onClick={() => void save()} disabled={busy || !path.trim()}>
+            {busy ? "Saving…" : "Save"}
+          </button>
+        </footer>
+      </div>
+      {pickerOpen && <DirectoryPicker onCancel={() => setPickerOpen(false)} onSelect={selectFolder} />}
+    </div>,
+    document.body,
   );
 }
 
@@ -380,12 +544,17 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCwd, setSelectedCwd] = useState<string | null>(null);
+  const [highlightedProjectRoot, setHighlightedProjectRoot] = useState<string | null>(null);
   const [homeDir, setHomeDir] = useState<string>("");
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
   const [sessionSearch, setSessionSearch] = useState("");
   const [projectsOpen, setProjectsOpen] = useState(true);
   const [allProjectsVisible, setAllProjectsVisible] = useState(false);
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(() => new Set());
+  const [projectFolders, setProjectFolders] = useState<string[]>([]);
+  const [pinnedProjects, setPinnedProjects] = useState<Set<string>>(() => new Set());
+  const [projectLabels, setProjectLabels] = useState<Record<string, string>>({});
+  const [editingProject, setEditingProject] = useState<string | null>(null);
   const sessionSearchRef = useRef<HTMLInputElement>(null);
   const [customPathOpen, setCustomPathOpen] = useState(false);
   const [customPathValue, setCustomPathValue] = useState("");
@@ -407,6 +576,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // Once the SSE stream has delivered a frame it is the source of truth for
   // running state; late /api/sessions responses must not overwrite it.
   const sseAuthoritativeRef = useRef(false);
+
+  useEffect(() => {
+    setProjectFolders(loadStringArray(PROJECT_FOLDERS_STORAGE_KEY));
+    setPinnedProjects(new Set(loadStringArray(PINNED_PROJECTS_STORAGE_KEY)));
+    setProjectLabels(loadProjectLabels());
+  }, []);
 
   const loadSessions = useCallback(async (showLoading = false) => {
     try {
@@ -608,7 +783,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         setCustomPathError(data.error ?? `HTTP ${res.status}`);
         return;
       }
-      setSelectedCwd(data.cwd ?? path);
+      const validatedPath = data.cwd ?? path;
+      setProjectFolders((previous) => {
+        const next = previous.includes(validatedPath) ? previous : [...previous, validatedPath];
+        saveStringArray(PROJECT_FOLDERS_STORAGE_KEY, next);
+        return next;
+      });
+      setSelectedCwd(validatedPath);
       setCustomPathOpen(false);
       setCustomPathValue("");
     } catch (e) {
@@ -710,21 +891,69 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // open session after manually switching worktrees.
   const handleSelectSessionFromList = useCallback((s: SessionInfo) => {
     if (s.cwd) setSelectedCwd(s.cwd);
+    setHighlightedProjectRoot(null);
     onSelectSession(s);
   }, [onSelectSession]);
 
-  const handleNewSession = useCallback(() => {
-    if (!selectedCwd) return;
+  const createNewSession = useCallback((cwd: string) => {
+    setSelectedCwd(cwd);
+    setHighlightedProjectRoot(projectRootFor(cwd));
     // Generate a temporary UUID client-side — no backend call needed.
     // Pi will be spawned lazily when the user sends the first message.
     const tempId = typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
       : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
-    onNewSession?.(tempId, selectedCwd);
-  }, [selectedCwd, onNewSession]);
+    onNewSession?.(tempId, cwd);
+  }, [onNewSession, projectRootFor]);
+
+  const handleNewSession = useCallback(() => {
+    if (selectedCwd) createNewSession(selectedCwd);
+  }, [createNewSession, selectedCwd]);
+
+  const toggleProjectPin = useCallback((root: string) => {
+    setPinnedProjects((previous) => {
+      const next = new Set(previous);
+      if (next.has(root)) {
+        next.delete(root);
+      } else {
+        next.add(root);
+      }
+      saveStringArray(PINNED_PROJECTS_STORAGE_KEY, [...next]);
+      return next;
+    });
+  }, []);
+
+  const saveProjectEdit = useCallback((previousRoot: string, nextRoot: string, name: string) => {
+    setProjectFolders((previous) => {
+      const withoutOld = previous.filter((path) => path !== previousRoot);
+      const next = withoutOld.includes(nextRoot) ? withoutOld : [...withoutOld, nextRoot];
+      saveStringArray(PROJECT_FOLDERS_STORAGE_KEY, next);
+      return next;
+    });
+    setProjectLabels((previous) => {
+      const next = { ...previous };
+      delete next[previousRoot];
+      next[nextRoot] = name;
+      saveProjectLabels(next);
+      return next;
+    });
+    setPinnedProjects((previous) => {
+      if (!previous.has(previousRoot) || previousRoot === nextRoot) return previous;
+      const next = new Set(previous);
+      next.delete(previousRoot);
+      next.add(nextRoot);
+      saveStringArray(PINNED_PROJECTS_STORAGE_KEY, [...next]);
+      return next;
+    });
+    if (projectRootFor(selectedCwd) === previousRoot) setSelectedCwd(nextRoot);
+    setEditingProject(null);
+  }, [projectRootFor, selectedCwd]);
 
   // Sessions of every worktree in the selected project are shown together
   const selectedProject = projectRootFor(selectedCwd);
+  useEffect(() => {
+    if (selectedSessionId) setHighlightedProjectRoot(null);
+  }, [selectedSessionId]);
   const normalizedSessionSearch = sessionSearch.trim().toLowerCase();
   const projectGroups = useMemo(() => {
     const groups = new Map<string, { root: string; sessions: SessionInfo[]; modified: string }>();
@@ -743,14 +972,22 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       }
     }
 
-    if (!normalizedSessionSearch && selectedProject && !groups.has(selectedProject)) {
-      groups.set(selectedProject, { root: selectedProject, sessions: [], modified: "" });
+    if (!normalizedSessionSearch) {
+      for (const root of projectFolders) {
+        if (!groups.has(root)) groups.set(root, { root, sessions: [], modified: "" });
+      }
+      if (selectedProject && !groups.has(selectedProject)) {
+        groups.set(selectedProject, { root: selectedProject, sessions: [], modified: "" });
+      }
     }
 
     return [...groups.values()]
-      .sort((a, b) => b.modified.localeCompare(a.modified))
+      .sort((a, b) => {
+        const pinDifference = Number(pinnedProjects.has(b.root)) - Number(pinnedProjects.has(a.root));
+        return pinDifference || b.modified.localeCompare(a.modified);
+      })
       .map((group) => ({ ...group, roots: buildSessionTree(group.sessions) }));
-  }, [allSessions, normalizedSessionSearch, selectedProject]);
+  }, [allSessions, normalizedSessionSearch, pinnedProjects, projectFolders, selectedProject]);
 
   const visibleProjectGroups = useMemo(() => {
     if (normalizedSessionSearch || allProjectsVisible || projectGroups.length <= 5) return projectGroups;
@@ -773,6 +1010,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   return (
     <div className="session-sidebar" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      {editingProject && (
+        <ProjectEditDialog
+          root={editingProject}
+          initialName={projectLabels[editingProject] || projectDefaultLabel(editingProject)}
+          onCancel={() => setEditingProject(null)}
+          onSave={saveProjectEdit}
+        />
+      )}
       {customPathOpen && (
         <DirectoryPicker
           busy={customPathValidating}
@@ -808,12 +1053,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 flexShrink: 0,
                 transition: "background 0.12s, color 0.12s, border-color 0.12s",
               }}
-             title={selectedCwd ? t("sidebar.newSessionTitle", { path: selectedCwd }) : t("sidebar.selectProject")}
               onMouseEnter={(e) => {
                 if (!selectedCwd) return;
                 e.currentTarget.style.background = "var(--bg-selected)";
                 e.currentTarget.style.color = "var(--accent)";
-                e.currentTarget.style.borderColor = "rgba(28,60,60,0.35)";
+                e.currentTarget.style.borderColor = "color-mix(in srgb, var(--accent) 35%, var(--border))";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = "var(--bg-hover)";
@@ -831,13 +1075,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         </div>
 
         <div className="sidebar-primary-actions">
-          <button type="button" className="sidebar-primary-action" onClick={handleNewSession} disabled={!selectedCwd} title={selectedCwd ? t("sidebar.newSessionTitle", { path: selectedCwd }) : t("sidebar.selectProject")}>
+          <button type="button" className="sidebar-primary-action" onClick={handleNewSession} disabled={!selectedCwd}>
             <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
             </svg>
             <span>New task</span>
           </button>
-          <button type="button" className="sidebar-primary-action" onClick={onAgentClick} title="Agent">
+          <button type="button" className="sidebar-primary-action" onClick={onAgentClick}>
             <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="4" y="7" width="16" height="12" rx="2" /><path d="M9 7V4h6v3M8 13h.01M16 13h.01M9 17h6" />
             </svg>
@@ -849,7 +1093,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               <input ref={sessionSearchRef} value={sessionSearch} onChange={(e) => setSessionSearch(e.target.value)} onBlur={() => { if (!sessionSearch) setSessionSearchOpen(false); }} onKeyDown={(e) => { if (e.key === "Escape") { setSessionSearch(""); setSessionSearchOpen(false); } }} placeholder="Search" aria-label="Search sessions" />
             </div>
           ) : (
-            <button type="button" className="sidebar-primary-action" onClick={() => setSessionSearchOpen(true)} title="Search">
+            <button type="button" className="sidebar-primary-action" onClick={() => setSessionSearchOpen(true)}>
               <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
               <span>Search</span>
             </button>
@@ -871,7 +1115,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             <div ref={wtDropdownRef} style={{ position: "relative", marginTop: 6 }}>
               <button
                 onClick={() => setWtDropdownOpen((v) => !v)}
-                 title={currentWt ? t("sidebar.switchWorktreeTitle", { path: currentWt.path }) : t("sidebar.switchWorktree")}
                 style={{
                   width: "100%",
                   height: 29,
@@ -965,7 +1208,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                               setWtDropdownOpen(false);
                               setWtError(null);
                             }}
-                            title={wt.path}
                             style={{
                               flex: 1,
                               minWidth: 0,
@@ -996,7 +1238,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                             <button
                               onClick={() => void handleRemoveWorktree(wt.path, false)}
                               disabled={wtBusy}
-                               title={t("sidebar.removeWorktreeTitle", { path: wt.path })}
+                              aria-label={t("sidebar.removeWorktreeTitle", { path: wt.path })}
                               style={{
                                 display: "flex", alignItems: "center", justifyContent: "center",
                                 width: 34, height: 28, padding: 0, marginRight: 4,
@@ -1029,7 +1271,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                         setWtError(null);
                         setTimeout(() => wtNewInputRef.current?.focus(), 0);
                       }}
-                      title={t("sidebar.createWorktreeTitle")}
                       style={{
                         display: "flex",
                         alignItems: "center",
@@ -1168,7 +1409,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 <polyline points="4 2.5 8 6 4 9.5" />
               </svg>
             </button>
-            <button type="button" onClick={handleCustomPathClick} className="projects-add" title="New project" aria-label="New project">+</button>
+            <button type="button" onClick={handleCustomPathClick} className="projects-add" aria-label="New project">+</button>
           </div>
         )}
         {projectsOpen && visibleProjectGroups.map((group) => {
@@ -1190,13 +1431,29 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             }
           }
 
-          const label = group.root.replace(/\\/g, "/").split("/").filter(Boolean).at(-1) || group.root;
+          const label = projectLabels[group.root] || projectDefaultLabel(group.root);
+          const isPinned = pinnedProjects.has(group.root);
+          const isActive = !selectedSessionId && highlightedProjectRoot === group.root;
           return (
             <section className="project-section" key={group.root}>
-              <div className="project-row" title={group.root}>
-                <button type="button" className="project-row-main" onClick={() => setSelectedCwd(group.root)}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
+              <div className={`project-row${isActive ? " is-active" : ""}`}>
+                <button type="button" className="project-row-main" onClick={() => { setSelectedCwd(group.root); setHighlightedProjectRoot(null); }} aria-current={isActive ? "true" : undefined}>
+                  <FolderIcon size={16} />
                   <span className="project-row-label">{label}</span>
+                  {isPinned && <svg className="project-pin-indicator" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-label="Pinned"><path d="m14 4 6 6-4 1-4 4-1 5-3-3-3-3 5-1 4-4Z" /></svg>}
+                </button>
+                <SidebarMoreMenu label={`Actions for ${label}`}>
+                  <button type="button" role="menuitem" onClick={() => toggleProjectPin(group.root)}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14 4 6 6-4 1-4 4-1 5-3-3-3-3 5-1 4-4Z" /></svg>
+                    <span>{isPinned ? "Unpin" : "Pin"}</span>
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => setEditingProject(group.root)}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" /></svg>
+                    <span>Edit</span>
+                  </button>
+                </SidebarMoreMenu>
+                <button type="button" className="project-new-task" onClick={() => createNewSession(group.root)} aria-label={`New task in ${label}`}>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
                 </button>
               </div>
               <div className="project-sessions">
@@ -1316,7 +1573,6 @@ function RunningSessionIndicator() {
   const { t } = useI18n();
   return (
     <span
-      title={t("sidebar.agentRunning")}
       aria-label={t("sidebar.agentRunning")}
       style={{
         width: 14,
@@ -1354,7 +1610,6 @@ function UnreadSessionIndicator() {
   const { t } = useI18n();
   return (
     <span
-      title={t("sidebar.newActivity")}
       aria-label={t("sidebar.newSessionActivity")}
       style={{
         width: 14,
@@ -1567,7 +1822,6 @@ function SessionItem({
                 lineHeight: 1.4,
                 color: "var(--text)",
               }}
-              title={title}
             >
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
                 {title}
@@ -1576,7 +1830,6 @@ function SessionItem({
             {session.worktreeBranch && (
               <div className="session-worktree-meta" style={{ marginTop: 2, display: "flex", alignItems: "center", color: "var(--accent)", fontSize: 11, minWidth: 0 }}>
                 <span
-                  title={`Worktree: ${session.cwd}`}
                   style={{ display: "flex", alignItems: "center", gap: 3, minWidth: 0, overflow: "hidden" }}
                 >
                   <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
@@ -1595,7 +1848,7 @@ function SessionItem({
           {hasChildren && (
             <button
               onClick={(e) => { e.stopPropagation(); onToggleCollapse?.(); }}
-              title={collapsed ? "Expand forks" : "Collapse forks"}
+              aria-label={collapsed ? "Expand forks" : "Collapse forks"}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
                 width: 20, height: 20, padding: 0, flexShrink: 0,
@@ -1611,12 +1864,6 @@ function SessionItem({
             </button>
           )}
 
-          {isRunning ? (
-            <RunningSessionIndicator />
-          ) : isUnread ? (
-            <UnreadSessionIndicator />
-          ) : null}
-
           {/* One quiet entry point keeps row actions from competing with titles. */}
           <SidebarMoreMenu label={`Actions for ${title}`}>
             <button type="button" role="menuitem" onClick={startRename}>
@@ -1625,7 +1872,7 @@ function SessionItem({
               </svg>
               <span>{t("sidebar.rename")}</span>
             </button>
-            <button type="button" role="menuitem" className="is-danger" onClick={handleDeleteClick} title={t("sidebar.deleteWithShiftClick")}>
+            <button type="button" role="menuitem" className="is-danger" onClick={handleDeleteClick}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <polyline points="3 6 5 6 21 6" />
                 <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
@@ -1635,6 +1882,12 @@ function SessionItem({
               <span>{t("sidebar.delete")}</span>
             </button>
           </SidebarMoreMenu>
+
+          {isRunning ? (
+            <RunningSessionIndicator />
+          ) : isUnread ? (
+            <UnreadSessionIndicator />
+          ) : null}
         </>
       )}
     </div>

@@ -1,4 +1,19 @@
-import type { AssistantContentBlock, AssistantMessage, ThinkingContent, ToolCallContent } from "./types";
+import type { AssistantContentBlock, AssistantMessage, TextContent, ThinkingContent, ToolCallContent } from "./types";
+
+export type TextPhase = "commentary" | "final_answer";
+
+export function getTextPhase(block: TextContent): TextPhase | undefined {
+  if (!block.textSignature?.startsWith("{")) return undefined;
+  try {
+    const signature = JSON.parse(block.textSignature) as { v?: unknown; phase?: unknown };
+    if (signature.v === 1 && (signature.phase === "commentary" || signature.phase === "final_answer")) {
+      return signature.phase;
+    }
+  } catch {
+    // Legacy and malformed signatures carry no display phase.
+  }
+  return undefined;
+}
 
 interface DisplayOptions {
   isStreaming?: boolean;
@@ -16,7 +31,8 @@ export function getDisplayableAssistantBlocks(
 }
 
 function isFinalAnswerBlock(block: AssistantContentBlock): boolean {
-  return block.type === "text" || block.type === "image";
+  if (block.type === "text") return getTextPhase(block) !== "commentary";
+  return block.type === "image";
 }
 
 export function splitFinalAssistantBlocks(

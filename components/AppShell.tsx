@@ -370,9 +370,15 @@ export function AppShell() {
   }, [router, selectedSession]);
 
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
+    // The sidebar updates its cwd after this click. Make that follow-up update
+    // recognize the newly selected session's project instead of clearing it as
+    // though the user had merely switched projects.
+    activeProjectRootRef.current = session.projectRoot ?? session.cwd;
     setNewSessionCwd(null);
     setSelectedSession(session);
-    setSessionKey((k) => k + 1);
+    // A session owns the entire ChatWindow state graph (messages, SSE, running
+    // tools, dialogs, queues, etc.). Remounting is the React-native reset.
+    setSessionKey((key) => key + 1);
     setSystemPrompt(null);
     setInitialSessionRestored(true);
     // On mobile, collapse the overlay drawer so the chat is revealed after pick.
@@ -629,7 +635,7 @@ export function AppShell() {
 
   const activeFileTab = fileTabs.find((t) => t.id === activeFileTabId) ?? null;
   const activeCwdName = activeCwd ? getFileName(activeCwd) || activeCwd : null;
-  const windowTitle = activeCwdName ? `${activeCwdName} - weclio` : "weclio";
+  const windowTitle = "weclio";
 
   useEffect(() => {
     const syncWindowTitle = () => {
@@ -703,7 +709,6 @@ export function AppShell() {
             key={label}
             onClick={onClick}
             disabled={disabled}
-            title={label}
             style={{
               flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
               height: 32, padding: 0, background: "none", border: "none",
@@ -737,7 +742,7 @@ export function AppShell() {
           transform: translateY(0);
           filter: blur(0);
           background: color-mix(in srgb, var(--accent) 8%, var(--bg-panel));
-          box-shadow: 0 18px 44px rgba(37,99,235,0.16);
+          box-shadow: 0 18px 44px color-mix(in srgb, var(--accent) 16%, transparent);
         }
         100% {
           opacity: 1;
@@ -831,7 +836,6 @@ export function AppShell() {
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize sidebar"
-          title="Drag to resize · Double-click to reset"
         />
       </div>
 
@@ -841,7 +845,6 @@ export function AppShell() {
         <div ref={topBarRef} style={{ display: "flex", alignItems: "center", flexShrink: 0, borderBottom: "1px solid var(--border)", height: 36, background: "var(--bg-panel)" }}>
           <button
             onClick={handleSidebarToggle}
-             title={sidebarOpen ? translate("sidebar.hide") : translate("sidebar.show")}
              aria-label={sidebarOpen ? translate("sidebar.hide") : translate("sidebar.show")}
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",

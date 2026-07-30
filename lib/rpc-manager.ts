@@ -62,6 +62,7 @@ type ExtensionBindingOptions = {
 };
 
 const CODING_TOOL_NAMES = ["read", "bash", "edit", "write", "grep", "find", "ls"];
+const PROGRESS_UPDATE_INSTRUCTION = "You must always start with an intermediary update before any content in the analysis channel if the task will require calling tools. The user update should acknowledge the request and explain your first step.";
 
 // Extensions require a complete Theme, while the web UI applies its own styling.
 class PlainTextTheme extends Theme {
@@ -275,7 +276,12 @@ export class AgentSessionWrapper {
     }, 10 * 60 * 1000);
   }
 
-  private persistBashOnlySession(): void {
+  /**
+   * Pi normally waits for the first assistant message before it writes a new
+   * session file. Persist its current header/entries early so a just-sent
+   * first prompt (or shell command) is visible in the sidebar immediately.
+   */
+  private persistPendingSession(): void {
     const manager = this.inner.sessionManager;
     const sessionFile = manager.getSessionFile();
     if (!sessionFile || existsSync(sessionFile)) return;
@@ -288,9 +294,8 @@ export class AgentSessionWrapper {
       .join("\n") + "\n";
     writeFileSync(sessionFile, content, { encoding: "utf8", flag: "wx" });
 
-    // Pi normally delays the first flush until an assistant message exists.
-    // A leading shell command has no assistant message, so mark this SDK
-    // manager as flushed after writing its own generated entries.
+    // Subsequent entries must append to the file we just created rather than
+    // wait for Pi's normal first-assistant flush.
     (manager as unknown as { flushed: boolean }).flushed = true;
     cacheSessionPath(this.inner.sessionId, sessionFile);
   }
@@ -327,6 +332,11 @@ export class AgentSessionWrapper {
         const promptImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
         const streamingBehavior = command.streamingBehavior as "steer" | "followUp" | undefined;
         this.promptRunning = true;
+        // Make the new thread discoverable before returning from the prompt
+        // request. Otherwise Pi's deferred first-assistant flush means the
+        // sidebar cannot list it until the whole run completes.
+        this.persistPendingSession();
+        invalidateSessionListCache();
         notifyRunningChange();
         this.inner.prompt(command.message as string, {
           ...(promptImages?.length ? { images: promptImages } : {}),
@@ -410,18 +420,20 @@ export class AgentSessionWrapper {
         const entry = sessionManager.getEntry(entryId);
         if (!entry) throw new Error("Invalid entry ID for forking");
 
+        // User-message New chat keeps the existing behavior (branch before the
+        // selected prompt). Assistant-message New chat includes the selected
+        // response, so the new session can continue from that exact answer.
+        const branchLeafId = command.includeEntry === true ? entry.id : entry.parentId;
         const sessionDir = sessionManager.getSessionDir();
         let newSessionFile: string;
 
-        if (!entry.parentId) {
-          // Fork before the first message: create an empty session linked to this one
+        if (!branchLeafId) {
           const newManager = SessionManager.create(sessionManager.getCwd(), sessionDir);
           newManager.newSession({ parentSession: currentSessionFile });
           newSessionFile = newManager.getSessionFile() as string;
         } else {
-          // Fork after some history: copy path up to (but not including) the fork point
           const sourceManager = SessionManager.open(currentSessionFile, sessionDir);
-          const forkedPath = sourceManager.createBranchedSession(entry.parentId);
+          const forkedPath = sourceManager.createBranchedSession(branchLeafId);
           if (!forkedPath) throw new Error("Failed to create forked session");
           newSessionFile = forkedPath;
         }
@@ -439,6 +451,17 @@ export class AgentSessionWrapper {
         }
         const result = await this.inner.navigateTree(command.targetId as string, {});
         return { cancelled: result.cancelled };
+      }
+
+      case "navigate_before": {
+        if (this.inner.isBashRunning) {
+          throw new Error("Cannot navigate while a shell command is running");
+        }
+        const entry = this.inner.sessionManager.getEntry(command.entryId as string);
+        if (!entry) throw new Error("Invalid entry ID for navigation");
+        if (!entry.parentId) throw new Error("Cannot edit before the first session entry");
+        const result = await this.inner.navigateTree(entry.parentId, {});
+        return { cancelled: result.cancelled, targetId: entry.parentId };
       }
 
       case "set_thinking_level": {
@@ -598,7 +621,7 @@ export class AgentSessionWrapper {
         notifyRunningChange();
         try {
           const result = await execution;
-          this.persistBashOnlySession();
+          this.persistPendingSession();
           return result;
         } finally {
           invalidateSessionListCache();
@@ -1139,6 +1162,9 @@ export async function startRpcSession(
     const services = await createAgentSessionServices({
       cwd,
       agentDir,
+      resourceLoaderOptions: {
+        appendSystemPromptOverride: (base) => [...base, PROGRESS_UPDATE_INSTRUCTION],
+      },
       ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
     });
     const { session: inner } = await createAgentSessionFromServices({
