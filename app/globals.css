@@ -912,7 +912,7 @@ span.linenumber {
 .session-sidebar-header-row > button {
   color: var(--text) !important;
   font-family: Georgia, "Times New Roman", serif !important;
-  font-size: 16px !important;
+  font-size: 18px !important;
   font-weight: 600 !important;
   letter-spacing: -0.045em !important;
   line-height: 1 !important;

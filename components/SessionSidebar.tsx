@@ -529,7 +529,7 @@ function PiWebTitle() {
       style={{
         display: "flex", alignItems: "center", gap: 5,
         background: "none", border: "none", padding: "0 2px", cursor: "default",
-        fontWeight: 700, fontSize: 15, letterSpacing: "-0.01em",
+        fontWeight: 700, fontSize: 18, letterSpacing: "-0.01em",
         color: showVersion ? "var(--accent)" : "var(--text)",
         fontFamily: "var(--font-mono)",
         minWidth: "6ch",
