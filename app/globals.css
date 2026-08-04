@@ -897,6 +897,18 @@ span.linenumber {
 }
 
 /* Primary navigation mirrors ai-agent-app's deliberately spare action area. */
+.session-sidebar-brand {
+  min-width: 0;
+}
+
+.session-sidebar-brand-icon {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border-radius: 6px;
+  background: url("/brand/weclio-sidebar.svg?v=1") center / contain no-repeat;
+}
+
 .session-sidebar-header-row > button {
   color: var(--text) !important;
   font-family: Georgia, "Times New Roman", serif !important;

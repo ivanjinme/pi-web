@@ -524,16 +524,27 @@ function PiWebTitle() {
 
   return (
     <button
+      className="session-sidebar-brand"
       onClick={handleClick}
       style={{
-        background: "none", border: "none", padding: 0, cursor: "default",
+        display: "flex", alignItems: "center", gap: 5,
+        background: "none", border: "none", padding: "0 2px", cursor: "default",
         fontWeight: 700, fontSize: 15, letterSpacing: "-0.01em",
         color: showVersion ? "var(--accent)" : "var(--text)",
         fontFamily: "var(--font-mono)",
         minWidth: "6ch",
       }}
     >
-      {display}
+      <span
+        className="session-sidebar-brand-icon"
+        aria-hidden="true"
+        style={{
+          display: "block", width: 24, height: 24, flex: "0 0 24px",
+          borderRadius: 6,
+          background: 'url("/brand/weclio-sidebar.svg?v=1") center / contain no-repeat',
+        }}
+      />
+      <span>{display}</span>
     </button>
   );
 }

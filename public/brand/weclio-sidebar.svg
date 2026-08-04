@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Weclio">
+  <defs>
+    <linearGradient id="background" x1="52" y1="32" x2="462" y2="490" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#06152f"/>
+      <stop offset="0.55" stop-color="#081d40"/>
+      <stop offset="1" stop-color="#0d2b55"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="88" y1="396" x2="428" y2="194" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18b9ff"/>
+      <stop offset="0.48" stop-color="#29dce1"/>
+      <stop offset="1" stop-color="#18efb9"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="120" fill="url(#background)"/>
+  <path
+    d="M90 205 C103 282 124 348 163 381 C185 400 208 385 222 351 L246 290 C254 268 273 268 282 290 L305 352 C319 386 342 401 365 379 C402 344 416 278 427 201"
+    fill="none"
+    stroke="#087aa9"
+    stroke-opacity="0.18"
+    stroke-width="62"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M90 205 C103 282 124 348 163 381 C185 400 208 385 222 351 L246 290 C254 268 273 268 282 290 L305 352 C319 386 342 401 365 379 C402 344 416 278 427 201"
+    fill="none"
+    stroke="url(#mark)"
+    stroke-width="52"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M348 48 C354 89 367 102 408 108 C367 114 354 127 348 168 C342 127 329 114 288 108 C329 102 342 89 348 48Z"
+    fill="#fff3b0"
+  />
+  <path
+    d="M238 74 C241 94 247 100 267 103 C247 106 241 112 238 132 C235 112 229 106 209 103 C229 100 235 94 238 74Z"
+    fill="#ffe171"
+  />
+</svg>

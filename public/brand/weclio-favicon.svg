@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Weclio">
+  <defs>
+    <linearGradient id="background" x1="56" y1="36" x2="456" y2="488" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#06152f"/>
+      <stop offset="1" stop-color="#0d2a53"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="96" y1="390" x2="416" y2="216" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18baff"/>
+      <stop offset="0.5" stop-color="#27dfe0"/>
+      <stop offset="1" stop-color="#16efbd"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="120" fill="url(#background)"/>
+  <path
+    d="M96 224 C108 292 128 352 165 380 C187 397 209 378 224 340 L241 296 C252 267 272 267 284 296 L302 342 C317 379 339 397 362 376 C396 345 406 284 417 220"
+    fill="none"
+    stroke="url(#mark)"
+    stroke-width="58"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M350 54 C355 91 367 103 404 108 C367 113 355 125 350 162 C345 125 333 113 296 108 C333 103 345 91 350 54Z"
+    fill="#fff3ad"
+  />
+  <path
+    d="M230 78 C233 96 238 101 256 104 C238 107 233 112 230 130 C227 112 222 107 204 104 C222 101 227 96 230 78Z"
+    fill="#ffe171"
+  />
+</svg>
