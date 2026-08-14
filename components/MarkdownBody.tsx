@@ -25,6 +25,8 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
         rehypePlugins={markdownRehypePlugins}
         components={{
           code({ className, children, ...props }) {
+            // `node` is react-markdown metadata, not a DOM attribute.
+            delete props.node;
             const lang = className?.replace("language-", "").toLowerCase() ?? "";
             const raw = String(children);
             const isBlock = className?.includes("language-") || raw.includes("\n");

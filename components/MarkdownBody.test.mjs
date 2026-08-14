@@ -9,14 +9,19 @@ const jiti = createJiti(import.meta.url, {
   tsconfigPaths: true,
 });
 const { MarkdownBody } = await jiti.import("./MarkdownBody.tsx");
+const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 const { normalizeDisplayMath } = await jiti.import("../lib/markdown.ts");
 
 function renderMarkdown(markdown) {
   return renderToStaticMarkup(
-    React.createElement(MarkdownBody, {
-      cwd: "/home/me/project",
-      onOpenFile() {},
-    }, markdown),
+    React.createElement(
+      I18nProvider,
+      null,
+      React.createElement(MarkdownBody, {
+        cwd: "/home/me/project",
+        onOpenFile() {},
+      }, markdown),
+    ),
   );
 }
 
@@ -35,6 +40,30 @@ test("keeps local file markdown links in the app", () => {
 
   assert.match(html, /<a href="components\/MarkdownBody\.tsx">file<\/a>/);
   assert.doesNotMatch(html, /target=|rel=|\snode=/);
+});
+
+test("renders unknown XML tags as code instead of hiding them", () => {
+  const html = renderMarkdown("before <request>value</request> after");
+
+  assert.match(html, /<code class="markdown-inline-code">&lt;request&gt;<\/code>/);
+  assert.match(html, /value/);
+  assert.match(html, /<code class="markdown-inline-code">&lt;\/request&gt;<\/code>/);
+});
+
+test("keeps allowed raw HTML rendering normally", () => {
+  const html = renderMarkdown("<strong>value</strong>");
+
+  assert.match(html, /<strong>value<\/strong>/);
+  assert.doesNotMatch(html, /&lt;strong&gt;/);
+});
+
+test("renders multiline custom XML as an XML code block", () => {
+  const html = renderMarkdown("<request>\nvalue\n</request>");
+
+  assert.match(html, /markdown-code-lang">xml/);
+  assert.equal(html.match(/request/g)?.length, 2);
+  assert.match(html, /value/);
+  assert.doesNotMatch(html, /<\/?request>/);
 });
 
 test("renders LaTeX parenthesis delimiters as inline math", () => {

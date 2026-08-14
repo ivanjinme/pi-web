@@ -14,6 +14,46 @@ const markdownSanitizeSchema = {
   strip: [...(defaultSchema.strip || []), "iframe", "object", "style", "form"],
 };
 
+const allowedRawHtmlTags = new Set(defaultSchema.tagNames ?? []);
+const htmlTagPattern = /<\/?([A-Za-z][A-Za-z0-9:._-]*)(?=[\s/>])/g;
+
+interface MarkdownAstNode {
+  type: string;
+  value?: string;
+  lang?: string;
+  children?: MarkdownAstNode[];
+}
+
+/** Render custom XML-like tags as code instead of letting HTML sanitization hide them. */
+function remarkPreserveUnknownXmlTags() {
+  return (tree: MarkdownAstNode) => {
+    visitMarkdownNodes(tree, (node) => {
+      if (node.type !== "html" || !node.value || !containsUnknownHtmlTag(node.value)) return;
+
+      if (node.value.includes("\n") || node.value.includes("\r")) {
+        node.type = "code";
+        node.lang = "xml";
+      } else {
+        node.type = "inlineCode";
+      }
+    });
+  };
+}
+
+function visitMarkdownNodes(node: MarkdownAstNode, visitor: (node: MarkdownAstNode) => void): void {
+  visitor(node);
+  node.children?.forEach((child) => visitMarkdownNodes(child, visitor));
+}
+
+function containsUnknownHtmlTag(html: string): boolean {
+  htmlTagPattern.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = htmlTagPattern.exec(html)) !== null) {
+    if (!allowedRawHtmlTags.has(match[1].toLowerCase())) return true;
+  }
+  return false;
+}
+
 export function normalizeDisplayMath(markdown: string): string {
   const lineBreak = markdown.includes("\r\n") ? "\r\n" : "\n";
   const lines = markdown.split(/\r?\n/);
@@ -160,8 +200,16 @@ function normalizeInlineLatexMath(line: string): string {
   );
 }
 
-export const markdownRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [remarkGfm, remarkMath];
-export const markdownPreviewRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [remarkGfm, remarkMath];
+export const markdownRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [
+  remarkGfm,
+  remarkMath,
+  remarkPreserveUnknownXmlTags,
+];
+export const markdownPreviewRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [
+  remarkGfm,
+  remarkMath,
+  remarkPreserveUnknownXmlTags,
+];
 
 export const markdownRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [
   rehypeRaw,
