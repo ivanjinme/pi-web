@@ -450,18 +450,15 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             <div
               className="mb-3"
               style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                marginLeft: 16,
-                marginRight: 52,
+                color: "var(--text)",
                 fontFamily: "var(--font-mono)",
+                fontSize: 22,
+                fontWeight: 700,
+                lineHeight: 1.4,
+                textAlign: "center",
               }}
             >
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0, flex: 1, lineHeight: 1.4, overflow: "hidden" }}>
-                <span style={{ fontSize: 22, color: "var(--text)", fontWeight: 700, letterSpacing: 0, flexShrink: 0, whiteSpace: "nowrap" }}>weclio</span>
-              </div>
+              What’s on your mind today?
             </div>
             <NoticeShelf notices={notices} align="right" />
             {chatInputElement}
