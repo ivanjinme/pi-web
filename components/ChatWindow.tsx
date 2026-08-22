@@ -227,6 +227,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   // top, load another page while keeping the scroll position stable.
   const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const latestTurnRef = useRef<HTMLDivElement>(null);
   const prevScrollDistanceRef = useRef<number | null>(null);
 
   // IntersectionObserver on the sentinel div at the top of the message list.
@@ -258,6 +259,24 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     container.scrollTop = restoreScrollTop(container.scrollHeight, prevScrollDistanceRef.current);
     prevScrollDistanceRef.current = null;
   }, [visibleCount, scrollContainerRef]);
+
+  useEffect(() => {
+    if (!agentRunning) return;
+    const container = scrollContainerRef.current;
+    const latestTurn = latestTurnRef.current;
+    if (!container || !latestTurn) return;
+    let scrollHeight = container.scrollHeight;
+    const observer = new ResizeObserver(() => {
+      const nextScrollHeight = container.scrollHeight;
+      const shouldFollow = nextScrollHeight > scrollHeight
+        && scrollHeight - container.clientHeight - container.scrollTop <= 24;
+      scrollHeight = nextScrollHeight;
+      if (shouldFollow) container.scrollTo({ top: nextScrollHeight });
+    });
+    observer.observe(latestTurn);
+    return () => observer.disconnect();
+  }, [agentRunning, scrollContainerRef]);
+
   // Push session stats up to AppShell for the top bar.
   // Compare scalar fields to avoid loops from new object identity each render.
   const statsKey = sessionStats
@@ -576,6 +595,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               };
 
               const rendered: ReactNode[] = [];
+              let latestTurnStart: number | null = null;
               for (let idx = 0; idx < messages.length;) {
                 const msg = messages[idx];
                 if (!isGroupAnchor(msg)) {
@@ -588,6 +608,10 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 let endIdx = userIdx + 1;
                 while (endIdx < messages.length && !isGroupAnchor(messages[endIdx])) endIdx += 1;
 
+                const isLatestTurn = endIdx === messages.length && userIdx === lastAnchorIdx;
+                const isLiveTail = (sessionBusy || streamState.isStreaming) && isLatestTurn;
+                if (isLatestTurn) latestTurnStart = rendered.length;
+
                 const finalAssistantIdx = findFinalAssistantIndex(messages, userIdx, endIdx);
 
                 if (finalAssistantIdx === -1) {
@@ -598,7 +622,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                   continue;
                 }
 
-                const isLiveTail = (sessionBusy || streamState.isStreaming) && endIdx === messages.length && userIdx === lastAnchorIdx;
                 if (isLiveTail) {
                   for (let renderIdx = userIdx; renderIdx < endIdx; renderIdx++) {
                     rendered.push(renderMessage(renderIdx));
@@ -664,6 +687,20 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 idx = endIdx;
               }
               const { startIndex, hasMore } = getVisibleRenderWindow(rendered.length, visibleCount);
+              const visible = rendered.slice(startIndex);
+              const latestStart = latestTurnStart === null ? -1 : Math.max(0, latestTurnStart - startIndex);
+              const liveOutput = (
+                <>
+                  {streamState.isStreaming && streamState.streamingMessage && (
+                    <MessageView message={streamState.streamingMessage as AgentMessage} isStreaming modelNames={modelNames} cwd={messageCwd} onOpenFile={onOpenFile} />
+                  )}
+                  {agentRunning && !streamState.streamingMessage && (
+                    <div className="py-2 text-[13px] text-text-muted">
+                      <span className="animate-[pulse_1.5s_infinite]">{phaseLabel(agentPhase, t)}</span>
+                    </div>
+                  )}
+                </>
+              );
               return (
                 <>
                   {hasMore && (
@@ -671,19 +708,20 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                        {t("chat.loadEarlier", { count: startIndex })}
                     </div>
                   )}
-                  {rendered.slice(startIndex)}
+                  {latestStart === -1 ? (
+                    <>{visible}{liveOutput}</>
+                  ) : (
+                    <>
+                      {visible.slice(0, latestStart)}
+                      <div ref={latestTurnRef} style={{ minHeight: scrollContainerRef.current?.clientHeight ?? "80vh" }}>
+                        {visible.slice(latestStart)}
+                        {liveOutput}
+                      </div>
+                    </>
+                  )}
                 </>
               );
             })()}
-            {streamState.isStreaming && streamState.streamingMessage && (
-              <MessageView message={streamState.streamingMessage as AgentMessage} isStreaming modelNames={modelNames} cwd={messageCwd} onOpenFile={onOpenFile} />
-            )}
-
-            {agentRunning && !streamState.streamingMessage && (
-              <div className="py-2 text-[13px] text-text-muted">
-                <span className="animate-[pulse_1.5s_infinite]">{phaseLabel(agentPhase, t)}</span>
-              </div>
-            )}
 
             {bashRunning && !pendingBash && (
               <div className="py-2 text-[13px] text-text-muted">
@@ -701,10 +739,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 } as BashExecutionMessage}
                 sessionId={session?.id ?? sessionIdRef.current ?? undefined}
               />
-            )}
-
-            {agentRunning && (
-              <div style={{ height: scrollContainerRef.current ? scrollContainerRef.current.clientHeight : "80vh" }} />
             )}
 
             <div ref={messagesEndRef} />
