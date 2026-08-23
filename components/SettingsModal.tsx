@@ -15,6 +15,8 @@ interface Props {
   branch?: string;
   sessionId: string | null;
   projectTrusted: boolean;
+  showSessionDiagnostics: boolean;
+  onSessionDiagnosticsChange: (show: boolean) => void;
   onClose: () => void;
   onTrustProject: () => void;
   onPluginsReloaded: () => void;
@@ -26,6 +28,8 @@ export function SettingsModal({
   branch,
   sessionId,
   projectTrusted,
+  showSessionDiagnostics,
+  onSessionDiagnosticsChange,
   onClose,
   onTrustProject,
   onPluginsReloaded,
@@ -109,6 +113,13 @@ export function SettingsModal({
                   <div className="settings-segmented">
                     <button type="button" className={locale === "en" ? "is-active" : ""} onClick={() => setLocale("en")}>English</button>
                     <button type="button" className={locale === "zh-CN" ? "is-active" : ""} onClick={() => setLocale("zh-CN")}>简体中文</button>
+                  </div>
+                </div>
+                <div className="settings-row">
+                  <span>{t("settings.sessionDiagnostics")}</span>
+                  <div className="settings-segmented">
+                    <button type="button" className={!showSessionDiagnostics ? "is-active" : ""} onClick={() => onSessionDiagnosticsChange(false)}>{t("settings.hide")}</button>
+                    <button type="button" className={showSessionDiagnostics ? "is-active" : ""} onClick={() => onSessionDiagnosticsChange(true)}>{t("settings.show")}</button>
                   </div>
                 </div>
               </section>

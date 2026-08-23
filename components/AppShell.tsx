@@ -23,6 +23,8 @@ import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 
 type SessionCopyField = "file" | "id";
+type TopPanel = "branches" | "system" | "session";
+type ContextUsage = { percent: number | null; contextWindow: number; tokens: number | null };
 
 interface SettingsContext {
   cwd: string | null;
@@ -42,6 +44,7 @@ const RIGHT_PANEL_MIN_WIDTH = 320;
 const EXPLORER_WIDTH_STORAGE_KEY = "pi-web:explorer-width";
 const EXPLORER_MIN_WIDTH = 170;
 const EXPLORER_COLLAPSED_WIDTH = 33;
+const SESSION_DIAGNOSTICS_STORAGE_KEY = "pi-web:session-diagnostics";
 
 export function AppShell() {
   const router = useRouter();
@@ -72,6 +75,7 @@ export function AppShell() {
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const lastExpandedSidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
+  const [showSessionDiagnostics, setShowSessionDiagnostics] = useState(false);
   // On mobile the sidebar is an overlay drawer; hide it by default so the chat
   // is visible on load. Runs once the breakpoint resolves after hydration.
   useEffect(() => {
@@ -95,6 +99,7 @@ export function AppShell() {
   }, [userMenuOpen]);
 
   useLayoutEffect(() => {
+    setShowSessionDiagnostics(window.localStorage.getItem(SESSION_DIAGNOSTICS_STORAGE_KEY) === "true");
     const storedWidth = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
     if (Number.isFinite(storedWidth) && storedWidth >= SIDEBAR_MIN_WIDTH && storedWidth <= SIDEBAR_MAX_WIDTH) {
       setSidebarWidth(storedWidth);
@@ -123,7 +128,6 @@ export function AppShell() {
   }, []);
 
   const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
-  const systemBtnRef = useRef<HTMLButtonElement>(null);
 
   const handleSystemPromptChange = useCallback((prompt: string | null) => {
     setSystemPrompt(prompt);
@@ -151,16 +155,22 @@ export function AppShell() {
   }, []);
 
   // Context usage — populated by ChatWindow, displayed in top bar
-  const [contextUsage, setContextUsage] = useState<{ percent: number | null; contextWindow: number; tokens: number | null } | null>(null);
-  const handleContextUsageChange = useCallback((usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => {
+  const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
+  const handleContextUsageChange = useCallback((usage: ContextUsage | null) => {
     setContextUsage(usage);
   }, []);
 
   // Single active panel — only one dropdown open at a time
-  const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | "session" | null>(null);
+  const [activeTopPanel, setActiveTopPanel] = useState<TopPanel | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
-  const toggleTopPanel = useCallback((panel: "branches" | "system" | "session") => {
+  const handleSessionDiagnosticsChange = useCallback((show: boolean) => {
+    setShowSessionDiagnostics(show);
+    window.localStorage.setItem(SESSION_DIAGNOSTICS_STORAGE_KEY, String(show));
+    if (!show) setActiveTopPanel(null);
+  }, []);
+
+  const toggleTopPanel = useCallback((panel: TopPanel) => {
     if (isMobile) setSidebarOpen(false);
     setActiveTopPanel((cur) => cur === panel ? null : panel);
   }, [isMobile]);
@@ -839,14 +849,14 @@ export function AppShell() {
       {/* Center: chat */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         {/* Top bar with sidebar toggle */}
-        <div ref={topBarRef} style={{ display: "flex", alignItems: "center", flexShrink: 0, borderBottom: "1px solid var(--border)", height: 36, background: "var(--bg-panel)" }}>
+        <div ref={topBarRef} style={{ display: "flex", alignItems: "center", flexShrink: 0, height: 36 }}>
           <button
             onClick={handleSidebarToggle}
              aria-label={sidebarOpen ? translate("sidebar.hide") : translate("sidebar.show")}
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
               width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
-              background: "none", border: "none", borderRight: "1px solid var(--border)",
+              background: "none", border: "none",
               color: "var(--text-muted)", cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
             }}
             onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
@@ -905,8 +915,14 @@ export function AppShell() {
               {!isMobile && <span>{translate("trust.resourcesNotLoaded")}</span>}
             </button>
           )}
-          {showChat && (
-            <div style={{ display: "flex", alignItems: "stretch", height: "100%" }}>
+          {showChat && showSessionDiagnostics && (
+            <div style={{
+              display: "flex",
+              alignItems: "stretch",
+              height: "100%",
+              marginLeft: "auto",
+              paddingRight: rightPanelOpen ? 0 : TOP_BAR_ICON_BUTTON_SIZE,
+            }}>
               <button
                 onClick={handleViewFullHistory}
                 disabled={!selectedSession}
@@ -917,11 +933,10 @@ export function AppShell() {
                   alignItems: "center",
                   gap: 6,
                   height: "100%",
-                  padding: "0 12px",
+                  padding: "0 6px",
                   background: "none",
                   border: "none",
                   borderTop: "2px solid transparent",
-                  borderRight: "1px solid var(--border)",
                   color: selectedSession ? "var(--text-muted)" : "var(--text-dim)",
                   cursor: selectedSession ? "pointer" : "not-allowed",
                   opacity: selectedSession ? 1 : 0.45,
@@ -972,18 +987,16 @@ export function AppShell() {
                 hasSession
               />
               <button
-                ref={systemBtnRef}
                 onClick={() => toggleTopPanel("system")}
                  title={translate("system.prompt")}
                  aria-label={translate("system.prompt")}
                 aria-pressed={activeTopPanel === "system"}
                 style={{
                   display: "flex", alignItems: "center", gap: 6,
-                  height: "100%", padding: "0 12px",
+                  height: "100%", padding: "0 6px",
                   background: activeTopPanel === "system" ? "var(--bg-selected)" : "none",
                   border: "none",
                   borderTop: activeTopPanel === "system" ? "2px solid var(--accent)" : "2px solid transparent",
-                  borderRight: "1px solid var(--border)",
                   cursor: "pointer",
                   color: activeTopPanel === "system" ? "var(--text)" : "var(--text-muted)",
                   fontSize: 11, whiteSpace: "nowrap", transition: "color 0.1s, background 0.1s",
@@ -999,10 +1012,8 @@ export function AppShell() {
                 </svg>
                  {!isMobile && <span>{translate("system.label")}</span>}
               </button>
-            </div>
-          )}
-          {/* Session stats — right-aligned in top bar */}
-          {showChat && (sessionStats || contextUsage) && (() => {
+          {/* Session stats */}
+          {(sessionStats || contextUsage) && (() => {
              const tokens = sessionStats?.tokens;
             const c = sessionStats?.cost ?? 0;
             const fmt = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n);
@@ -1039,10 +1050,8 @@ export function AppShell() {
                  aria-label={translate("session.title")}
                 aria-pressed={activeTopPanel === "session"}
                 style={{
-                  marginLeft: "auto",
-                  display: "flex", alignItems: "center", gap: 10,
-                  paddingLeft: 12,
-                  paddingRight: rightPanelOpen ? 12 : 48,
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "0 12px 0 6px",
                   height: "100%",
                   background: activeTopPanel === "session" ? "var(--bg-selected)" : "none",
                   border: "none",
@@ -1100,6 +1109,8 @@ export function AppShell() {
               </button>
             );
           })()}
+            </div>
+          )}
           {/* Top panel dropdown — shared, only one active at a time */}
           {activeTopPanel && topPanelPos && (
             <div style={{
@@ -1485,7 +1496,7 @@ export function AppShell() {
         position: "fixed", top: 0, right: 0, zIndex: 300,
         display: "flex", alignItems: "center", justifyContent: "center",
         width: 36, height: 36, padding: 0,
-        background: "var(--bg-panel)", border: "none", borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
+        background: "transparent", border: "none",
         color: rightPanelOpen ? "var(--text)" : "var(--text-muted)",
         cursor: "pointer", transition: "color 0.12s",
       }}
@@ -1503,6 +1514,8 @@ export function AppShell() {
         branch={settingsContext.branch}
         sessionId={selectedSession?.id ?? null}
         projectTrusted={!settingsContext.cwd || projectTrust?.trusted === true}
+        showSessionDiagnostics={showSessionDiagnostics}
+        onSessionDiagnosticsChange={handleSessionDiagnosticsChange}
         onClose={() => {
           setSettingsContext(null);
           setProjectTrustDialogOpen(false);
