@@ -1621,41 +1621,33 @@ span.linenumber {
   .chat-history-preview { animation: none; }
 }
 
-/* Right workspace: project context above, file content below. */
+/* Right workspace: open file tabs above, file content below. */
 .right-workspace-titlebar {
-  display: flex;
-  align-items: center;
-  gap: 7px;
   height: 36px;
   min-height: 36px;
-  padding: 0 44px 0 11px;
+  padding-right: 36px;
+  overflow: hidden;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
+}
+
+.right-workspace-titlebar > div {
+  width: 100%;
+}
+
+.right-workspace-titlebar .right-empty-file-tab {
+  display: inline-flex;
+  width: auto;
+  min-width: 80px;
+  height: 36px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border-right: 1px solid var(--border);
+  background: var(--bg);
   color: var(--text-muted);
-}
-
-.right-workspace-project {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text);
   font-size: 12px;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.right-workspace-branch {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  padding: 2px 6px;
-  border-radius: 999px;
-  background: var(--bg-selected);
-  color: var(--accent);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  user-select: none;
 }
 
 .right-workspace-body {
@@ -1675,6 +1667,11 @@ span.linenumber {
   overflow: hidden;
   background: color-mix(in srgb, var(--bg-panel) 42%, var(--bg));
   order: 3;
+  transition: width 0.2s ease;
+}
+
+.right-explorer-pane.is-resizing {
+  transition: none;
 }
 
 .right-explorer-toolbar {
@@ -1687,14 +1684,9 @@ span.linenumber {
   border-bottom: 1px solid var(--border);
 }
 
-.right-explorer-label {
-  flex: 1;
-  padding-left: 2px;
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+.right-explorer-toggle {
+  flex-shrink: 0;
+  margin-right: auto;
 }
 
 .right-workspace-icon {
@@ -1768,24 +1760,39 @@ span.linenumber {
 }
 
 .right-file-tabs {
+  display: flex;
+  align-items: center;
   height: 36px;
   min-height: 36px;
+  padding: 0 12px;
   overflow: hidden;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
-.right-empty-file-tab {
+.right-file-tabs > span {
   display: inline-flex;
+  min-width: 0;
   align-items: center;
-  gap: 7px;
-  height: 30px;
-  margin: 3px 0 0 4px;
-  padding: 0 12px;
-  border-radius: 7px 7px 0 0;
-  background: var(--bg-hover);
-  color: var(--text-muted);
-  font-size: 11px;
+}
+
+.right-file-tabs > span.is-current {
+  color: var(--text);
+}
+
+.right-file-breadcrumb-separator {
+  flex-shrink: 0;
+  padding: 0 8px;
+  color: var(--text-dim);
+  font-size: 17px;
+}
+
+.right-file-breadcrumb-segment {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .right-empty-file-view {
@@ -1926,18 +1933,6 @@ span.linenumber {
 
 .sidebar-user-name {
   flex: 1;
-}
-
-.sidebar-user-trigger > svg {
-  width: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  transition: transform 120ms ease;
-}
-
-.sidebar-user-trigger > svg.is-open {
-  transform: rotate(180deg);
 }
 
 .sidebar-user-menu {

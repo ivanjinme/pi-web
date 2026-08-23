@@ -14,7 +14,7 @@ import { BranchNavigator } from "./BranchNavigator";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { copyText } from "@/lib/clipboard";
-import { getFileName } from "@/lib/file-paths";
+import { getFileName, getRelativeFilePath } from "@/lib/file-paths";
 import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import { getInitialNavigation } from "@/lib/initial-navigation";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
@@ -40,6 +40,8 @@ const RIGHT_PANEL_OPEN_STORAGE_KEY = "pi-web:right-panel-open";
 const RIGHT_PANEL_WIDTH_STORAGE_KEY = "pi-web:right-panel-width";
 const RIGHT_PANEL_MIN_WIDTH = 320;
 const EXPLORER_WIDTH_STORAGE_KEY = "pi-web:explorer-width";
+const EXPLORER_MIN_WIDTH = 170;
+const EXPLORER_COLLAPSED_WIDTH = 33;
 
 export function AppShell() {
   const router = useRouter();
@@ -241,6 +243,8 @@ export function AppShell() {
   const [rightPanelResizing, setRightPanelResizing] = useState(false);
   const [rightExplorerCollapsed, setRightExplorerCollapsed] = useState(false);
   const [rightExplorerWidth, setRightExplorerWidth] = useState(230);
+  const [rightExplorerResizing, setRightExplorerResizing] = useState(false);
+  const lastExpandedExplorerWidthRef = useRef(230);
   const [rightExplorerUploadBusy, setRightExplorerUploadBusy] = useState(false);
   const [rightChangesCount, setRightChangesCount] = useState(0);
   const [rightChangesCollapsed, setRightChangesCollapsed] = useState(true);
@@ -279,13 +283,14 @@ export function AppShell() {
     setRightPanelWidth(panelWidth);
     document.documentElement.style.setProperty("--saved-right-panel-width", `${panelWidth}px`);
 
-    const maxExplorerWidth = Math.max(170, panelWidth - 220);
+    const maxExplorerWidth = Math.max(EXPLORER_MIN_WIDTH, panelWidth - 220);
     const storedExplorerValue = window.localStorage.getItem(EXPLORER_WIDTH_STORAGE_KEY);
     const storedExplorerWidth = Number(storedExplorerValue);
     const explorerWidth = storedExplorerValue !== null && Number.isFinite(storedExplorerWidth)
-      ? Math.min(maxExplorerWidth, Math.max(170, storedExplorerWidth))
+      ? Math.min(maxExplorerWidth, Math.max(EXPLORER_MIN_WIDTH, storedExplorerWidth))
       : Math.min(maxExplorerWidth, 230);
     setRightExplorerWidth(explorerWidth);
+    lastExpandedExplorerWidthRef.current = explorerWidth;
     document.documentElement.style.setProperty("--saved-explorer-width", `${explorerWidth}px`);
     setRightPanelPreferenceLoaded(true);
   }, []);
@@ -557,11 +562,12 @@ export function AppShell() {
     const workspace = rightWorkspaceRef.current;
     if (!workspace) return;
     event.preventDefault();
+    setRightExplorerResizing(true);
     const bounds = workspace.getBoundingClientRect();
     let pendingWidth = rightExplorerWidth;
     const move = (pointerEvent: PointerEvent) => {
       const available = Math.max(360, bounds.width);
-      pendingWidth = Math.max(170, Math.min(available - 220, bounds.right - pointerEvent.clientX));
+      pendingWidth = Math.max(EXPLORER_COLLAPSED_WIDTH, Math.min(available - 220, bounds.right - pointerEvent.clientX));
       setRightExplorerWidth(pendingWidth);
       document.documentElement.style.setProperty("--saved-explorer-width", `${pendingWidth}px`);
     };
@@ -570,6 +576,16 @@ export function AppShell() {
       document.removeEventListener("pointerup", stop);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
+      setRightExplorerResizing(false);
+
+      if (pendingWidth < EXPLORER_MIN_WIDTH) {
+        setRightExplorerCollapsed(true);
+        setRightExplorerWidth(lastExpandedExplorerWidthRef.current);
+        document.documentElement.style.setProperty("--saved-explorer-width", `${lastExpandedExplorerWidthRef.current}px`);
+        return;
+      }
+
+      lastExpandedExplorerWidthRef.current = pendingWidth;
       window.localStorage.setItem(EXPLORER_WIDTH_STORAGE_KEY, String(pendingWidth));
     };
     document.body.style.cursor = "col-resize";
@@ -640,7 +656,12 @@ export function AppShell() {
   }, [projectTrustBusy, projectTrustCwd]);
 
   const activeFileTab = fileTabs.find((t) => t.id === activeFileTabId) ?? null;
-  const activeCwdName = activeCwd ? getFileName(activeCwd) || activeCwd : null;
+  const activeFileBreadcrumb = activeFileTab?.filePath
+    ? [
+        ...(activeCwd ? [getFileName(activeCwd) || activeCwd] : []),
+        ...getRelativeFilePath(activeFileTab.filePath, activeCwd ?? undefined).split(/[\\/]+/).filter(Boolean),
+      ]
+    : [];
   function openSettings() {
     setUserMenuOpen(false);
     setSettingsContext({
@@ -698,7 +719,6 @@ export function AppShell() {
         <button type="button" className="sidebar-user-trigger" onClick={() => setUserMenuOpen((open) => !open)} aria-haspopup="menu" aria-expanded={userMenuOpen}>
           <span className="sidebar-user-avatar">S</span>
           <span className="sidebar-user-name">super user</span>
-          <svg className={userMenuOpen ? "is-open" : ""} viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></svg>
         </button>
       </div>
     </>
@@ -1354,25 +1374,42 @@ export function AppShell() {
       >
         <div className="right-panel-resizer" onPointerDown={handleRightPanelResizeStart} role="separator" aria-orientation="vertical" aria-label="Resize workspace" />
         <div className="right-workspace-titlebar">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
-          </svg>
-          <span className="right-workspace-project" title={activeCwd ?? undefined}>{activeCwdName ?? "Workspace"}</span>
-          {selectedSession?.worktreeBranch && <span className="right-workspace-branch">{selectedSession.worktreeBranch}</span>}
+          {fileTabs.length > 0 ? (
+            <TabBar
+              tabs={fileTabs}
+              activeTabId={activeFileTabId ?? ""}
+              onSelectTab={setActiveFileTabId}
+              onCloseTab={handleCloseFileTab}
+            />
+          ) : (
+            <div className="right-empty-file-tab">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6" /></svg>
+              <span>Open file</span>
+            </div>
+          )}
         </div>
 
         <div ref={rightWorkspaceRef} className="right-workspace-body">
           {rightPanelOpen && activeCwd ? (
             <>
               <section
-                className="right-explorer-pane"
-                style={{ width: rightExplorerCollapsed ? 33 : "var(--saved-explorer-width, 230px)", flex: "0 0 auto" }}
+                className={`right-explorer-pane${rightExplorerResizing ? " is-resizing" : ""}`}
+                style={{ width: rightExplorerCollapsed ? EXPLORER_COLLAPSED_WIDTH : "var(--saved-explorer-width, 230px)", flex: "0 0 auto" }}
               >
                 <div className="right-explorer-toolbar">
-                  <button type="button" className="right-workspace-icon" onClick={() => setRightExplorerCollapsed((value) => !value)} title={rightExplorerCollapsed ? "Expand Explorer" : "Collapse Explorer"} aria-expanded={!rightExplorerCollapsed}>
-                    <svg width="11" height="11" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ transform: rightExplorerCollapsed ? "rotate(180deg)" : "none", transition: "transform 120ms ease" }} aria-hidden="true"><polyline points="3 2 7 5 3 8" /></svg>
+                  <button
+                    type="button"
+                    className="right-workspace-icon right-explorer-toggle"
+                    onClick={() => setRightExplorerCollapsed((value) => !value)}
+                    title={rightExplorerCollapsed ? "Expand Explorer" : "Collapse Explorer"}
+                    aria-label={rightExplorerCollapsed ? "Expand Explorer" : "Collapse Explorer"}
+                    aria-expanded={!rightExplorerCollapsed}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M7 5h4l2 2h6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-1" />
+                      <path d="M3 8h4l2 2h6a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z" />
+                    </svg>
                   </button>
-                  <span className="right-explorer-label">Files</span>
                   {rightChangesCount > 0 && (
                     <button type="button" className={`right-workspace-icon${rightChangesCollapsed ? "" : " is-active"}`} onClick={() => setRightChangesCollapsed((value) => !value)} title={`${rightChangesCount} changed files`} aria-pressed={!rightChangesCollapsed}>
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M3 12h6M15 12h6" /></svg>
@@ -1404,21 +1441,14 @@ export function AppShell() {
               )}
 
               <section className="right-file-pane">
-                <div className="right-file-tabs">
-                  {fileTabs.length > 0 ? (
-                    <TabBar
-                      tabs={fileTabs}
-                      activeTabId={activeFileTabId ?? ""}
-                      onSelectTab={setActiveFileTabId}
-                      onCloseTab={handleCloseFileTab}
-                    />
-                  ) : (
-                    <div className="right-empty-file-tab">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6" /></svg>
-                      <span>Open file</span>
-                    </div>
-                  )}
-                </div>
+                <nav className="right-file-tabs" aria-label="File location" title={activeFileTab?.filePath}>
+                  {activeFileBreadcrumb.map((segment, index) => (
+                    <span key={`${segment}-${index}`} className={index === activeFileBreadcrumb.length - 1 ? "is-current" : undefined}>
+                      {index > 0 && <span className="right-file-breadcrumb-separator" aria-hidden="true">›</span>}
+                      <span className="right-file-breadcrumb-segment">{segment}</span>
+                    </span>
+                  ))}
+                </nav>
                 <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
                   {activeFileTab?.filePath ? (
                     <FileViewer
