@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { existsSync, readFileSync, statSync } from "fs";
+import { homedir } from "os";
 import { basename, dirname, extname, join, relative } from "path";
 import {
   DefaultPackageManager,
@@ -201,9 +202,9 @@ function collectResources(paths: ResolvedPaths): {
   return { countsByPackage, resourcesByPackage, totals };
 }
 
-async function readPlugins(cwd: string): Promise<PluginsResponse> {
+async function readPlugins(cwd: string, globalOnly = false): Promise<PluginsResponse> {
   const agentDir = getAgentDir();
-  const projectTrust = getProjectTrustStatus(cwd, agentDir);
+  const projectTrust = globalOnly ? { trusted: false } : getProjectTrustStatus(cwd, agentDir);
   const settingsManager = SettingsManager.create(cwd, agentDir, {
     projectTrusted: projectTrust.trusted,
   });
@@ -281,14 +282,17 @@ function readScope(scope: unknown): PluginScope {
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const cwd = searchParams.get("cwd");
-  if (!cwd) return NextResponse.json({ error: "cwd required" }, { status: 400 });
+  const globalOnly = searchParams.get("global") === "true";
+  if (!cwd && !globalOnly) return NextResponse.json({ error: "cwd required" }, { status: 400 });
 
   try {
-    const allowedRoots = await getAllowedFileRoots();
-    if (!isExistingFilePathAllowed(cwd, allowedRoots)) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    if (cwd) {
+      const allowedRoots = await getAllowedFileRoots();
+      if (!isExistingFilePathAllowed(cwd, allowedRoots)) {
+        return NextResponse.json({ error: "Access denied" }, { status: 403 });
+      }
     }
-    return NextResponse.json(await readPlugins(cwd));
+    return NextResponse.json(await readPlugins(cwd ?? homedir(), globalOnly));
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
@@ -310,19 +314,20 @@ export async function POST(req: Request) {
       scope?: PluginScope;
       cwd?: string;
     };
-    if (!body.cwd) return NextResponse.json({ error: "cwd required" }, { status: 400 });
     if (!body.action) return NextResponse.json({ error: "action required" }, { status: 400 });
-    const allowedRoots = await getAllowedFileRoots();
-    if (!isExistingFilePathAllowed(body.cwd, allowedRoots)) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    const scope = readScope(body.scope);
+    if (!body.cwd && scope === "project") return NextResponse.json({ error: "cwd required" }, { status: 400 });
+    if (body.cwd) {
+      const allowedRoots = await getAllowedFileRoots();
+      if (!isExistingFilePathAllowed(body.cwd, allowedRoots)) {
+        return NextResponse.json({ error: "Access denied" }, { status: 403 });
+      }
     }
 
+    const cwd = body.cwd ?? homedir();
     const agentDir = getAgentDir();
-    const projectTrust = getProjectTrustStatus(body.cwd, agentDir);
-    const settingsManager = SettingsManager.create(body.cwd, agentDir, {
-      projectTrusted: projectTrust.trusted,
-    });
-    const scope = readScope(body.scope);
+    const projectTrust = body.cwd ? getProjectTrustStatus(body.cwd, agentDir) : { trusted: false };
+    const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: projectTrust.trusted });
     if (scope === "project" && !projectTrust.trusted) {
       return NextResponse.json(
         { error: "Project resources must be trusted before modifying project plugins" },
@@ -330,7 +335,7 @@ export async function POST(req: Request) {
       );
     }
     const packageManager = new DefaultPackageManager({
-      cwd: body.cwd,
+      cwd,
       agentDir,
       settingsManager,
     });
@@ -357,7 +362,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `Unsupported action: ${body.action}` }, { status: 400 });
     }
 
-    return NextResponse.json(await readPlugins(body.cwd));
+    return NextResponse.json(await readPlugins(cwd, !body.cwd));
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }

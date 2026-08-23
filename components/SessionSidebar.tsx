@@ -36,7 +36,6 @@ interface Props {
   onSessionDeleted?: (sessionId: string) => void;
   selectedCwd?: string | null;
   onCwdChange?: (cwd: string | null, projectRoot?: string | null) => void;
-  onAgentClick?: () => void;
 }
 
 interface WorktreeEntry {
@@ -549,7 +548,7 @@ function PiWebTitle() {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onAgentClick }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1092,7 +1091,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             </svg>
             <span>New task</span>
           </button>
-          <button type="button" className="sidebar-primary-action" onClick={onAgentClick}>
+          <button type="button" className="sidebar-primary-action" title={t("settings.advancedFeature")}>
             <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="4" y="7" width="16" height="12" rx="2" /><path d="M9 7V4h6v3M8 13h.01M16 13h.01M9 17h6" />
             </svg>

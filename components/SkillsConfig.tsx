@@ -171,7 +171,7 @@ function SkillDetail({
           <span
             style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}
           >
-            Source
+            {t("i18n.source")}
           </span>
           <a
             href={skill.install.skillsShUrl}
@@ -342,11 +342,13 @@ function AddSkillPanel({
   cwd,
   installedPackages,
   projectResourcesLoaded,
+  hasProject,
   onInstalled,
 }: {
   cwd: string;
   installedPackages: Record<SkillInstallScope, ReadonlySet<string>>;
   projectResourcesLoaded: boolean;
+  hasProject: boolean;
   onInstalled: () => void;
 }) {
   const { t } = useI18n();
@@ -361,6 +363,7 @@ function AddSkillPanel({
   );
   const [scope, setScope] = useState<"global" | "project">("global");
   const inputRef = useRef<HTMLInputElement>(null);
+  const projectUnavailable = !hasProject || !projectResourcesLoaded;
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -498,23 +501,23 @@ function AddSkillPanel({
               <button
                 key={s}
                 onClick={() => {
-                  if (s === "global" || projectResourcesLoaded) setScope(s);
+                  if (s === "global" || !projectUnavailable) setScope(s);
                 }}
-                disabled={s === "project" && !projectResourcesLoaded}
-                title={s === "project" && !projectResourcesLoaded ? t("trust.projectScopeUnavailable") : undefined}
+                disabled={s === "project" && projectUnavailable}
+                title={s === "project" && projectUnavailable ? t(hasProject ? "trust.projectScopeUnavailable" : "settings.openProjectForScope") : undefined}
                 style={{
                   padding: "3px 10px",
                   border: "none",
-                  cursor: s === "project" && !projectResourcesLoaded ? "not-allowed" : "pointer",
+                  cursor: s === "project" && projectUnavailable ? "not-allowed" : "pointer",
                   background: scope === s ? "var(--bg-selected)" : "none",
                   color: scope === s ? "var(--text)" : "var(--text-dim)",
                   fontWeight: scope === s ? 600 : 400,
-                  opacity: s === "project" && !projectResourcesLoaded ? 0.45 : 1,
+                  opacity: s === "project" && projectUnavailable ? 0.45 : 1,
                   borderRight:
                     s === "global" ? "1px solid var(--border)" : "none",
                 }}
               >
-                {s}
+                {t(`i18n.${s}`)}
               </button>
             ))}
           </div>
@@ -681,13 +684,11 @@ function AddSkillPanel({
   );
 }
 
-export function SkillsConfig({
-  cwd,
-  onClose,
-}: {
-  cwd: string;
-  onClose: () => void;
-}) {
+interface SkillsConfigProps {
+  cwd: string | null;
+}
+
+export function SkillsConfig({ cwd }: SkillsConfigProps) {
   const isMobile = useIsMobile();
   const { t } = useI18n();
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -702,13 +703,13 @@ export function SkillsConfig({
   const [checkingAll, setCheckingAll] = useState(false);
   const [updatingSkill, setUpdatingSkill] = useState<string | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
-  const [projectResourcesLoaded, setProjectResourcesLoaded] = useState(true);
+  const [projectResourcesLoaded, setProjectResourcesLoaded] = useState(!cwd);
 
   const loadSkills = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/skills?cwd=${encodeURIComponent(cwd)}`);
+      const res = await fetch(cwd ? `/api/skills?cwd=${encodeURIComponent(cwd)}` : "/api/skills?global=true");
       const d = (await res.json()) as Partial<SkillsResponse> & { error?: string };
       if (!res.ok || d.error) throw new Error(d.error ?? `HTTP ${res.status}`);
       const list = d.skills ?? [];
@@ -857,99 +858,8 @@ export function SkillsConfig({
   const selectedSkill = skills.find((s) => s.filePath === selected) ?? null;
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 1000,
-        background: "rgba(0,0,0,0.35)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        style={{
-          width: isMobile ? "calc(100vw - 16px)" : 860,
-          maxWidth: "calc(100vw - 16px)",
-          height: isMobile ? "calc(100dvh - 16px)" : "78vh",
-          maxHeight: "calc(100dvh - 16px)",
-          background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: 10,
-          display: "flex",
-          flexDirection: "column",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
-          overflow: "hidden",
-        }}
-      >
-        {/* Header */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "12px 18px",
-            borderBottom: "1px solid var(--border)",
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-            <span
-              style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}
-            >
-               {t("common.skills")}
-            </span>
-            <code
-              style={{
-                fontSize: 11,
-                color: "var(--text-muted)",
-                fontFamily: "var(--font-mono)",
-                maxWidth: 320,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {shortenPath(cwd)}
-            </code>
-          </div>
-          <button
-            onClick={onClose}
-            style={{
-              background: "none",
-              border: "none",
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              fontSize: 20,
-              lineHeight: 1,
-              padding: "2px 6px",
-            }}
-          >
-            ×
-          </button>
-        </div>
-
-        {!projectResourcesLoaded && (
-          <div
-            role="status"
-            style={{
-              padding: "8px 18px",
-              borderBottom: "1px solid var(--border)",
-              background: "var(--bg-panel)",
-              color: "var(--text-muted)",
-              fontSize: 12,
-            }}
-          >
-            {t("trust.skillsNotLoaded")}
-          </div>
-        )}
-
-        {/* Body */}
-        <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: "hidden" }}>
+    <>
+      <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: "hidden" }}>
           {/* Left: skill list */}
           <div
             style={{
@@ -999,31 +909,31 @@ export function SkillsConfig({
                   const groups: { label: string; skills: typeof skills }[] = [];
                   const groupDefinitions = [
                     {
-                      label: "project / skills.sh",
+                      label: `${t("i18n.project")} / skills.sh`,
                       matches: (skill: Skill) =>
                         sourceLabel(skill) === "project" &&
                         Boolean(skill.install?.skillsShUrl),
                     },
                     {
-                      label: "project",
+                      label: t("i18n.project"),
                       matches: (skill: Skill) =>
                         sourceLabel(skill) === "project" &&
                         !skill.install?.skillsShUrl,
                     },
                     {
-                      label: "global / skills.sh",
+                      label: `${t("i18n.global")} / skills.sh`,
                       matches: (skill: Skill) =>
                         sourceLabel(skill) === "global" &&
                         Boolean(skill.install?.skillsShUrl),
                     },
                     {
-                      label: "global",
+                      label: t("i18n.global"),
                       matches: (skill: Skill) =>
                         sourceLabel(skill) === "global" &&
                         !skill.install?.skillsShUrl,
                     },
                     {
-                      label: "path",
+                      label: t("i18n.path"),
                       matches: (skill: Skill) => sourceLabel(skill) === "path",
                     },
                   ];
@@ -1189,8 +1099,9 @@ export function SkillsConfig({
           <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
             {addMode ? (
               <AddSkillPanel
-                cwd={cwd}
+                cwd={cwd ?? ""}
                 projectResourcesLoaded={projectResourcesLoaded}
+                hasProject={Boolean(cwd)}
                 installedPackages={{
                   global: new Set(
                     skills
@@ -1211,7 +1122,7 @@ export function SkillsConfig({
               <SkillDetail
                 key={selectedSkill.filePath}
                 skill={selectedSkill}
-                cwd={cwd}
+                cwd={cwd ?? ""}
                 onToggle={toggle}
                 toggling={toggling.has(selectedSkill.filePath)}
                 saveError={saveError}
@@ -1247,18 +1158,16 @@ export function SkillsConfig({
           </div>
         </div>
 
-        {/* Footer */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "10px 18px",
-            borderTop: "1px solid var(--border)",
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          padding: "10px 18px",
+          borderTop: "1px solid var(--border)",
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {skills.some((skill) => Boolean(skill.install)) && (
               <button
                 onClick={() => void checkForUpdates()}
@@ -1296,23 +1205,8 @@ export function SkillsConfig({
                    : t("i18n.updates")}
               </span>
             )}
-          </div>
-          <button
-            onClick={onClose}
-            style={{
-              padding: "6px 14px",
-              background: "none",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              fontSize: 13,
-            }}
-          >
-             {t("i18n.close")}
-          </button>
         </div>
       </div>
-    </div>
+    </>
   );
 }

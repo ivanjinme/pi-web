@@ -19,15 +19,17 @@ export async function POST(req: Request) {
     const scope = body.scope === "global" || body.scope === "project"
       ? body.scope as SkillInstallScope
       : undefined;
-    if (!cwd || !pkg || !scope) {
+    if (!pkg || !scope || (!cwd && scope === "project")) {
       return NextResponse.json({ error: "cwd, package, and scope are required" }, { status: 400 });
     }
-    const allowedRoots = await getAllowedFileRoots();
-    if (!isExistingFilePathAllowed(cwd, allowedRoots)) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    if (cwd) {
+      const allowedRoots = await getAllowedFileRoots();
+      if (!isExistingFilePathAllowed(cwd, allowedRoots)) {
+        return NextResponse.json({ error: "Access denied" }, { status: 403 });
+      }
     }
 
-    const { skills } = await loadSkillsWithInstallInfo(cwd);
+    const { skills } = await loadSkillsWithInstallInfo(cwd || undefined);
     const skill = skills.find(
       (item) => item.install?.package === pkg && item.install.scope === scope,
     );
@@ -44,7 +46,7 @@ export async function POST(req: Request) {
       env: { ...process.env, FORCE_COLOR: "0" },
     });
 
-    const refreshed = await loadSkillsWithInstallInfo(cwd);
+    const refreshed = await loadSkillsWithInstallInfo(cwd || undefined);
     const updatedSkill = refreshed.skills.find(
       (item) => item.install?.package === pkg && item.install.scope === scope,
     );

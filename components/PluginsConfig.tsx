@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { sendAgentCommand } from "@/lib/agent-client";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import type { PluginPackageInfo, PluginsResponse } from "@/lib/api-types";
@@ -233,10 +233,12 @@ function Toggle({
 function SegmentedScope({
   value,
   projectResourcesLoaded,
+  hasProject,
   onChange,
 }: {
   value: PluginScope;
   projectResourcesLoaded: boolean;
+  hasProject: boolean;
   onChange: (scope: PluginScope) => void;
 }) {
   const { t } = useI18n();
@@ -252,7 +254,7 @@ function SegmentedScope({
     >
       {(["global", "project"] as PluginScope[]).map((scope) => {
         const active = value === scope;
-        const disabled = scope === "project" && !projectResourcesLoaded;
+        const disabled = scope === "project" && (!hasProject || !projectResourcesLoaded);
         return (
           <button
             key={scope}
@@ -260,7 +262,7 @@ function SegmentedScope({
               if (!disabled) onChange(scope);
             }}
             disabled={disabled}
-            title={disabled ? t("trust.projectScopeUnavailable") : undefined}
+            title={disabled ? t(hasProject ? "trust.projectScopeUnavailable" : "settings.openProjectForScope") : undefined}
             style={{
               width: 76,
               border: "none",
@@ -272,7 +274,7 @@ function SegmentedScope({
               fontSize: 12,
             }}
           >
-            {scope}
+            {t(`i18n.${scope}`)}
           </button>
         );
       })}
@@ -285,6 +287,7 @@ function AddPluginPanel({
   source,
   scope,
   projectResourcesLoaded,
+  hasProject,
   busy,
   actionError,
   onSourceChange,
@@ -295,6 +298,7 @@ function AddPluginPanel({
   source: string;
   scope: PluginScope;
   projectResourcesLoaded: boolean;
+  hasProject: boolean;
   busy: boolean;
   actionError: string | null;
   onSourceChange: (value: string) => void;
@@ -322,7 +326,7 @@ function AddPluginPanel({
 
       <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
         <label htmlFor="plugin-source" style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
-          Source
+          {t("i18n.source")}
         </label>
         <input
           id="plugin-source"
@@ -352,6 +356,7 @@ function AddPluginPanel({
         <SegmentedScope
           value={scope}
           projectResourcesLoaded={projectResourcesLoaded}
+          hasProject={hasProject}
           onChange={onScopeChange}
         />
         <button
@@ -371,7 +376,7 @@ function AddPluginPanel({
 
       <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
-          Examples
+          {t("i18n.examples")}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {examples.map((example) => (
@@ -573,17 +578,13 @@ function PackageDetail({
   );
 }
 
-export function PluginsConfig({
-  cwd,
-  sessionId,
-  onClose,
-  onReloaded,
-}: {
-  cwd: string;
+interface PluginsConfigProps {
+  cwd: string | null;
   sessionId: string | null;
-  onClose: () => void;
   onReloaded?: () => void;
-}) {
+}
+
+export function PluginsConfig({ cwd, sessionId, onReloaded }: PluginsConfigProps) {
   const isMobile = useIsMobile();
   const { t } = useI18n();
   const [data, setData] = useState<PluginsResponse | null>(null);
@@ -597,21 +598,18 @@ export function PluginsConfig({
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
-  const packages = useMemo(() => data?.packages ?? [], [data?.packages]);
+  const packages = data?.packages ?? [];
   const selectedPackage = packages.find((pkg) => packageKey(pkg) === selected) ?? null;
-  const projectResourcesLoaded = data?.projectResourcesLoaded ?? true;
-
-  const groupedPackages = useMemo(() => {
-    return (["project", "global"] as PluginScope[])
-      .map((scope) => ({ scope, packages: packages.filter((pkg) => pkg.scope === scope) }))
-      .filter((group) => group.packages.length > 0);
-  }, [packages]);
+  const projectResourcesLoaded = data?.projectResourcesLoaded ?? !cwd;
+  const groupedPackages = (["project", "global"] as PluginScope[])
+    .map((scope) => ({ scope, packages: packages.filter((pkg) => pkg.scope === scope) }))
+    .filter((group) => group.packages.length > 0);
 
   const loadPlugins = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/plugins?cwd=${encodeURIComponent(cwd)}`);
+      const res = await fetch(cwd ? `/api/plugins?cwd=${encodeURIComponent(cwd)}` : "/api/plugins?global=true");
       const next = (await res.json()) as PluginsResponse & { error?: string };
       if (!res.ok || next.error) throw new Error(next.error ?? `HTTP ${res.status}`);
       setData(next);
@@ -648,13 +646,13 @@ export function PluginsConfig({
       if (action === "remove") {
         setSelected(next.packages[0] ? packageKey(next.packages[0]) : null);
         if (next.packages.length === 0) setAddMode(true);
-        setActionMessage("Package removed.");
+        setActionMessage(t("i18n.packageRemoved"));
       } else {
         const messages: Record<Exclude<PluginAction, "remove">, string> = {
-          install: "Package installed.",
-          update: "Package updated.",
-          disable: "Package disabled.",
-          enable: "Package enabled.",
+          install: t("i18n.packageInstalled"),
+          update: t("i18n.packageUpdated"),
+          disable: t("i18n.packageDisabled"),
+          enable: t("i18n.packageEnabled"),
         };
         setActionMessage(messages[action]);
       }
@@ -663,7 +661,7 @@ export function PluginsConfig({
     } finally {
       setBusyKey(null);
     }
-  }, [cwd]);
+  }, [cwd, t]);
 
   const installPlugin = useCallback(async () => {
     const source = installSource.trim();
@@ -685,13 +683,13 @@ export function PluginsConfig({
       setSelected(installed ? packageKey(installed) : key);
       setAddMode(false);
       setInstallSource("");
-      setActionMessage("Package installed.");
+      setActionMessage(t("i18n.packageInstalled"));
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusyKey(null);
     }
-  }, [cwd, installScope, installSource]);
+  }, [cwd, installScope, installSource, t]);
 
   const reloadSession = useCallback(async () => {
     if (!sessionId) return;
@@ -702,105 +700,19 @@ export function PluginsConfig({
       await sendAgentCommand(sessionId, { type: "reload" });
       onReloaded?.();
       await loadPlugins();
-      setActionMessage("Session reloaded.");
+      setActionMessage(t("i18n.sessionReloaded"));
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusyKey(null);
     }
-  }, [loadPlugins, onReloaded, sessionId]);
+  }, [loadPlugins, onReloaded, sessionId, t]);
 
   const addBusy = busyKey?.startsWith("install:") ?? false;
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 1000,
-        background: "rgba(0,0,0,0.35)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        style={{
-          width: isMobile ? "calc(100vw - 16px)" : 860,
-          maxWidth: "calc(100vw - 16px)",
-          height: isMobile ? "calc(100dvh - 16px)" : "76vh",
-          maxHeight: "calc(100dvh - 16px)",
-          background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          display: "flex",
-          flexDirection: "column",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "12px 18px",
-            borderBottom: "1px solid var(--border)",
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
-            <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
-              {t("common.plugins")}
-            </span>
-            <code
-              style={{
-                fontSize: 11,
-                color: "var(--text-muted)",
-                fontFamily: "var(--font-mono)",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {shortenPath(cwd)}
-            </code>
-          </div>
-          <button
-            onClick={onClose}
-            style={{
-              background: "none",
-              border: "none",
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              fontSize: 20,
-              lineHeight: 1,
-              padding: "2px 6px",
-            }}
-          >
-            ×
-          </button>
-        </div>
-
-        {!projectResourcesLoaded && (
-          <div
-            role="status"
-            style={{
-              padding: "8px 18px",
-              borderBottom: "1px solid var(--border)",
-              background: "var(--bg-panel)",
-              color: "var(--text-muted)",
-              fontSize: 12,
-            }}
-          >
-            {t("trust.pluginsNotLoaded")}
-          </div>
-        )}
-
-        <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: "hidden" }}>
+    <>
+      <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: "hidden" }}>
           <div
             style={{
               width: isMobile ? "100%" : 245,
@@ -816,7 +728,7 @@ export function PluginsConfig({
             <div style={{ flex: 1, overflowY: "auto", padding: "8px 6px" }}>
               {loading ? (
                 <div style={{ padding: "10px 8px", fontSize: 12, color: "var(--text-muted)" }}>
-                  Loading...
+                  {t("i18n.loading")}
                 </div>
               ) : error ? (
                 <div style={{ padding: "10px 8px", fontSize: 11, color: "#ef4444" }}>
@@ -824,7 +736,7 @@ export function PluginsConfig({
                 </div>
               ) : packages.length === 0 ? (
                 <div style={{ padding: "10px 8px", fontSize: 11, color: "var(--text-dim)" }}>
-                  No plugins configured
+                  {t("i18n.noPlugins")}
                 </div>
               ) : (
                 groupedPackages.map((group) => (
@@ -838,7 +750,7 @@ export function PluginsConfig({
                         textTransform: "uppercase",
                       }}
                     >
-                      {group.scope}
+                      {t(`i18n.${group.scope}`)}
                     </div>
                     {group.packages.map((pkg) => {
                       const key = packageKey(pkg);
@@ -974,10 +886,11 @@ export function PluginsConfig({
           <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
             {addMode ? (
               <AddPluginPanel
-                cwd={cwd}
+                cwd={cwd ?? ""}
                 source={installSource}
                 scope={installScope}
                 projectResourcesLoaded={projectResourcesLoaded}
+                hasProject={Boolean(cwd)}
                 busy={addBusy}
                 actionError={actionError}
                 onSourceChange={setInstallSource}
@@ -988,7 +901,7 @@ export function PluginsConfig({
               <PackageDetail
                 key={packageKey(selectedPackage)}
                 pkg={selectedPackage}
-                cwd={cwd}
+                cwd={cwd ?? ""}
                 busyKey={busyKey}
                 actionError={actionError}
                 actionMessage={actionMessage}
@@ -1013,24 +926,24 @@ export function PluginsConfig({
           </div>
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            padding: "10px 18px",
-            borderTop: "1px solid var(--border)",
-            flexShrink: 0,
-          }}
-        >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          padding: "10px 18px",
+          borderTop: "1px solid var(--border)",
+          flexShrink: 0,
+        }}
+      >
           <div style={{ minWidth: 0, flex: 1, fontSize: 11, color: "var(--text-dim)", overflow: "hidden" }}>
             {data?.diagnostics.length ? (
               <span
                 title={data.diagnostics.map((d) => `${d.type}: ${d.source ? `${d.source}: ` : ""}${d.message}`).join("\n")}
                 style={{ color: data.diagnostics.some((d) => d.type === "error") ? "#ef4444" : "#d97706" }}
               >
-                {data.diagnostics.length} diagnostic{data.diagnostics.length === 1 ? "" : "s"}
+                {t("i18n.diagnosticCount", { count: data.diagnostics.length })}
               </span>
             ) : (
               <span>
@@ -1041,11 +954,7 @@ export function PluginsConfig({
           <button onClick={() => void loadPlugins()} disabled={loading || busyKey !== null} style={buttonStyle(loading || busyKey !== null)}>
              {t("i18n.refresh")}
           </button>
-          <button onClick={onClose} style={buttonStyle(false)}>
-             {t("i18n.close")}
-          </button>
-        </div>
       </div>
-    </div>
+    </>
   );
 }
