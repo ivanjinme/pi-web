@@ -76,6 +76,7 @@ interface Props {
   forking?: boolean;
   onEditFromHere?: EditFromHereHandler;
   showTimestamp?: boolean;
+  showActions?: boolean;
   prevTimestamp?: number;
   sessionId?: string;
 }
@@ -107,12 +108,12 @@ function haveSameRelevantToolResults(
   return true;
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, entryId, onFork, forking, onEditFromHere, showTimestamp, prevTimestamp, sessionId }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, entryId, onFork, forking, onEditFromHere, showTimestamp, showActions = true, prevTimestamp, sessionId }: Props) {
   if (message.role === "user") {
     return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onEditFromHere={onEditFromHere} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} showTimestamp={showTimestamp} showActions={showActions} prevTimestamp={prevTimestamp} sessionId={sessionId} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -140,6 +141,7 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.forking === next.forking
     && prev.onEditFromHere === next.onEditFromHere
     && prev.showTimestamp === next.showTimestamp
+    && prev.showActions === next.showActions
     && prev.prevTimestamp === next.prevTimestamp
     && prev.sessionId === next.sessionId;
 });
@@ -380,6 +382,7 @@ function AssistantMessageView({
   onFork,
   forking,
   showTimestamp,
+  showActions,
   prevTimestamp,
   sessionId,
 }: {
@@ -393,6 +396,7 @@ function AssistantMessageView({
   onFork?: Props["onFork"];
   forking?: boolean;
   showTimestamp?: boolean;
+  showActions?: boolean;
   prevTimestamp?: number;
   sessionId?: string;
 }) {
@@ -513,8 +517,8 @@ function AssistantMessageView({
   return (
     <div
       style={{ marginBottom: 16 }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseEnter={() => { if (showActions) setHovered(true); }}
+      onMouseLeave={() => { if (showActions) setHovered(false); }}
     >
       {/* Model label */}
       <div
@@ -570,7 +574,7 @@ function AssistantMessageView({
         ))}
       </div>
 
-      <div style={{
+      {showActions && <div style={{
         display: "flex", alignItems: "center", gap: 3, marginTop: 4,
         opacity: (hovered || forking) ? 1 : 0,
         pointerEvents: (hovered || forking) ? "auto" : "none",
@@ -636,7 +640,7 @@ function AssistantMessageView({
         {time && !isStreaming && (
           <span style={{ fontSize: 10, color: "var(--text-dim)", marginLeft: 3 }}>{time}</span>
         )}
-      </div>
+      </div>}
     </div>
   );
 }

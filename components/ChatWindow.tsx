@@ -29,6 +29,7 @@ interface RenderMessageOptions {
   messageOverride?: AgentMessage;
   showTimestamp?: boolean;
   allowFork?: boolean;
+  showActions?: boolean;
 }
 
 interface Props {
@@ -582,6 +583,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     forking={canFork && forkingEntryId === entryIds[idx]}
                     onEditFromHere={sessionBusy ? undefined : handleEditFromHere}
                     showTimestamp={showTimestamp}
+                    showActions={options.showActions}
                     prevTimestamp={idx > 0 ? (messages[idx - 1] as AgentMessage & { timestamp?: number }).timestamp : undefined}
                     sessionId={session?.id ?? sessionIdRef.current ?? undefined}
                   />
@@ -658,13 +660,14 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                        t={t}
                       toolCallCount={countToolCalls(messages, visibleProcessIndices) + countToolCallBlocks(finalSplit.processBlocks)}
                     >
-                      {visibleProcessIndices.map((processIdx) => renderMessage(processIdx, { attachRef: false, keyPrefix: "process" }))}
+                      {visibleProcessIndices.map((processIdx) => renderMessage(processIdx, { attachRef: false, keyPrefix: "process", showActions: false }))}
                       {finalProcessMessage && renderMessage(finalAssistantIdx, {
                         attachRef: false,
                         keyPrefix: "process-final",
                         messageOverride: finalProcessMessage,
                         showTimestamp: false,
                         allowFork: !finalAnswerMessage,
+                        showActions: false,
                       })}
                     </ProcessDetailsGroup>
                   );
