@@ -352,7 +352,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [currentModelOverride, setCurrentModelOverride] = useState<{ provider: string; modelId: string } | null>(null);
   const [pendingModel, setPendingModel] = useState<{ provider: string; modelId: string } | null>(null);
   const [isCompacting, setIsCompacting] = useState(false);
-  const [compactError, setCompactError] = useState<string | null>(null);
   const [compactResult, setCompactResult] = useState<CompactResultInfo | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>(null);
   const [slashCommands, setSlashCommands] = useState<SlashCommandInfo[]>([]);
@@ -1002,14 +1001,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       case "auto_compaction_start":
       case "compaction_start":
         setIsCompacting(true);
-        setCompactError(null);
         setCompactResult(null);
         break;
       case "auto_compaction_end":
       case "compaction_end":
         setIsCompacting(false);
         if (event.errorMessage) {
-          setCompactError(event.errorMessage as string);
           setCompactResult(null);
         } else if (!event.aborted) {
           setCompactResult(readCompactResult(event.result, (event.reason as string | undefined) ?? "auto"));
@@ -1247,24 +1244,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [isNew, setNewSessionModel]);
 
-  const handleCompact = useCallback(async () => {
-    const sid = sessionIdRef.current;
-    if (!sid || isCompacting) return;
-    setIsCompacting(true);
-    setCompactError(null);
-    setCompactResult(null);
-    try {
-      const result = await sendAgentCommand<CompactCommandResult>(sid, { type: "compact" });
-      setCompactResult(readCompactResult(result, "manual"));
-      await loadSession(sid, true);
-    } catch (e) {
-      setCompactError(e instanceof Error ? e.message : String(e));
-      setCompactResult(null);
-    } finally {
-      setIsCompacting(false);
-    }
-  }, [isCompacting, loadSession]);
-
   const loadModels = useCallback(async (signal?: AbortSignal) => {
     const modelCwd = newSessionCwd ?? session?.cwd ?? "";
     const modelsUrl = modelCwd ? `/api/models?cwd=${encodeURIComponent(modelCwd)}` : "/api/models";
@@ -1309,7 +1288,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         case "compact": {
           if (!sid || isCompacting) return complete({ handled: true, error: "No active session to compact" });
           setIsCompacting(true);
-          setCompactError(null);
           setCompactResult(null);
           const result = await sendAgentCommand<CompactCommandResult>(sid, {
             type: "compact",
@@ -1420,16 +1398,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       });
     } catch (e) {
       console.error("Failed to follow up:", e);
-    }
-  }, []);
-
-  const handleAbortCompaction = useCallback(async () => {
-    const sid = sessionIdRef.current;
-    if (!sid) return;
-    try {
-      await sendAgentCommand(sid, { type: "abort_compaction" });
-    } catch (e) {
-      console.error("Failed to abort compaction:", e);
     }
   }, []);
 
@@ -1555,13 +1523,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     return () => controller.abort();
   }, [loadModels, modelsRefreshKey]);
 
-  // Compact error auto-dismiss
-  useEffect(() => {
-    if (!compactError) return;
-    const t = setTimeout(() => setCompactError(null), 3000);
-    return () => clearTimeout(t);
-  }, [compactError]);
-
   useEffect(() => {
     if (!compactResult) return;
     const t = setTimeout(() => setCompactResult(null), 6000);
@@ -1594,7 +1555,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     data, loading, error, activeLeafId, messages, entryIds, streamState,
     agentRunning, modelNames, modelList, modelError, modelThinkingLevels, modelThinkingLevelMaps, newSessionModel, toolPreset, thinkingLevel,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
-    isCompacting, compactError, compactResult, currentModel, displayModel, sessionStats,
+    compactResult, currentModel, displayModel, sessionStats,
     slashCommands, slashCommandsLoading, queuedMessages,
     notices: noticeState.visible, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
     isAutoModelSelection: isNew && newSessionModel === null,
@@ -1605,7 +1566,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     lastUserMsgRef, pendingScrollToUserRef, initialScrollDoneRef,
     // Actions
     handleSend, handleAbort, handleFork, handleEditFromHere, handleModelChange,
-    handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
+    handleSteer, handleFollowUp, handlePromptWithStreamingBehavior,
     handleRecallQueue,
     handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, loadTools, loadSlashCommands, setActiveLeafId, setData, setMessages,

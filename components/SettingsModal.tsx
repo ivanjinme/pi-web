@@ -17,6 +17,8 @@ interface Props {
   projectTrusted: boolean;
   showSessionDiagnostics: boolean;
   onSessionDiagnosticsChange: (show: boolean) => void;
+  soundEnabled: boolean;
+  onSoundToggle: () => void;
   onClose: () => void;
   onTrustProject: () => void;
   onPluginsReloaded: () => void;
@@ -30,6 +32,8 @@ export function SettingsModal({
   projectTrusted,
   showSessionDiagnostics,
   onSessionDiagnosticsChange,
+  soundEnabled,
+  onSoundToggle,
   onClose,
   onTrustProject,
   onPluginsReloaded,
@@ -113,6 +117,13 @@ export function SettingsModal({
                   <div className="settings-segmented">
                     <button type="button" className={locale === "en" ? "is-active" : ""} onClick={() => setLocale("en")}>English</button>
                     <button type="button" className={locale === "zh-CN" ? "is-active" : ""} onClick={() => setLocale("zh-CN")}>简体中文</button>
+                  </div>
+                </div>
+                <div className="settings-row">
+                  <span>{t("settings.completionSound")}</span>
+                  <div className="settings-segmented">
+                    <button type="button" className={soundEnabled ? "is-active" : ""} onClick={() => { if (!soundEnabled) onSoundToggle(); }}>{t("settings.on")}</button>
+                    <button type="button" className={!soundEnabled ? "is-active" : ""} onClick={() => { if (soundEnabled) onSoundToggle(); }}>{t("settings.off")}</button>
                   </div>
                 </div>
                 <div className="settings-row">

@@ -13,6 +13,7 @@ import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator } from "./BranchNavigator";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useAudio } from "@/hooks/useAudio";
 import { copyText } from "@/lib/clipboard";
 import { getFileName, getRelativeFilePath } from "@/lib/file-paths";
 import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
@@ -52,6 +53,7 @@ export function AppShell() {
   const [initialNavigation] = useState(() => getInitialNavigation(searchParams));
   const { locale, t: translate } = useI18n();
   const isMobile = useIsMobile();
+  const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   // When user clicks +, we only store the cwd — no fake session id
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
@@ -1328,6 +1330,8 @@ export function AppShell() {
               onSessionStatsPanelOpen={openSessionStatsPanel}
               onContextUsageChange={handleContextUsageChange}
               onOpenFile={handleOpenLinkedFile}
+              playDoneSound={playDoneSound}
+              unlockAudio={unlockAudio}
             />
           ) : initialCwdStatus === "validating" ? (
             <div
@@ -1516,6 +1520,8 @@ export function AppShell() {
         projectTrusted={!settingsContext.cwd || projectTrust?.trusted === true}
         showSessionDiagnostics={showSessionDiagnostics}
         onSessionDiagnosticsChange={handleSessionDiagnosticsChange}
+        soundEnabled={soundEnabled}
+        onSoundToggle={onSoundToggle}
         onClose={() => {
           setSettingsContext(null);
           setProjectTrustDialogOpen(false);
