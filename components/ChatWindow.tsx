@@ -217,6 +217,11 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsPanelOpen,
   });
   const sessionBusy = agentRunning || bashRunning;
+  const runningToolLabel = agentPhase?.kind === "running_tools" ? phaseLabel(agentPhase, t) : undefined;
+  const runningToolCallIds = useMemo(
+    () => agentPhase?.kind === "running_tools" ? new Set(agentPhase.tools.map((tool) => tool.id)) : undefined,
+    [agentPhase],
+  );
 
   // Register the abort handler for the global Esc shortcut
   useEffect(() => {
@@ -586,6 +591,8 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     showActions={options.showActions}
                     prevTimestamp={idx > 0 ? (messages[idx - 1] as AgentMessage & { timestamp?: number }).timestamp : undefined}
                     sessionId={session?.id ?? sessionIdRef.current ?? undefined}
+                    runningToolLabel={runningToolLabel}
+                    runningToolCallIds={runningToolCallIds}
                   />
                 );
                 if (!isVisible || options.attachRef === false || currentRefIdx === undefined) return view;
@@ -626,7 +633,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
 
                 if (isLiveTail) {
                   for (let renderIdx = userIdx; renderIdx < endIdx; renderIdx++) {
-                    rendered.push(renderMessage(renderIdx));
+                    rendered.push(renderMessage(renderIdx, { showActions: false }));
                   }
                   idx = endIdx;
                   continue;
@@ -695,9 +702,9 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               const liveOutput = (
                 <>
                   {streamState.isStreaming && streamState.streamingMessage && (
-                    <MessageView message={streamState.streamingMessage as AgentMessage} isStreaming modelNames={modelNames} cwd={messageCwd} onOpenFile={onOpenFile} />
+                    <MessageView message={streamState.streamingMessage as AgentMessage} isStreaming modelNames={modelNames} cwd={messageCwd} onOpenFile={onOpenFile} showActions={false} runningToolLabel={runningToolLabel} runningToolCallIds={runningToolCallIds} />
                   )}
-                  {agentRunning && !streamState.streamingMessage && (
+                  {agentRunning && !streamState.streamingMessage && agentPhase?.kind !== "running_tools" && (
                     <div className="py-2 text-[13px] text-text-muted">
                       <span className="animate-[pulse_1.5s_infinite]">{phaseLabel(agentPhase, t)}</span>
                     </div>

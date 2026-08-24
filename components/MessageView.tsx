@@ -79,6 +79,8 @@ interface Props {
   showActions?: boolean;
   prevTimestamp?: number;
   sessionId?: string;
+  runningToolLabel?: string;
+  runningToolCallIds?: ReadonlySet<string>;
 }
 
 function formatTime(ts?: number): string | null {
@@ -108,12 +110,12 @@ function haveSameRelevantToolResults(
   return true;
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, entryId, onFork, forking, onEditFromHere, showTimestamp, showActions = true, prevTimestamp, sessionId }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, entryId, onFork, forking, onEditFromHere, showTimestamp, showActions = true, prevTimestamp, sessionId, runningToolLabel, runningToolCallIds }: Props) {
   if (message.role === "user") {
     return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onEditFromHere={onEditFromHere} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} showTimestamp={showTimestamp} showActions={showActions} prevTimestamp={prevTimestamp} sessionId={sessionId} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} showTimestamp={showTimestamp} showActions={showActions} prevTimestamp={prevTimestamp} sessionId={sessionId} runningToolLabel={runningToolLabel} runningToolCallIds={runningToolCallIds} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -143,7 +145,9 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.showTimestamp === next.showTimestamp
     && prev.showActions === next.showActions
     && prev.prevTimestamp === next.prevTimestamp
-    && prev.sessionId === next.sessionId;
+    && prev.sessionId === next.sessionId
+    && prev.runningToolLabel === next.runningToolLabel
+    && prev.runningToolCallIds === next.runningToolCallIds;
 });
 
 function UserMessageView({ message, cwd, onOpenFile, entryId, onEditFromHere }: {
@@ -385,6 +389,8 @@ function AssistantMessageView({
   showActions,
   prevTimestamp,
   sessionId,
+  runningToolLabel,
+  runningToolCallIds,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
@@ -399,6 +405,8 @@ function AssistantMessageView({
   showActions?: boolean;
   prevTimestamp?: number;
   sessionId?: string;
+  runningToolLabel?: string;
+  runningToolCallIds?: ReadonlySet<string>;
 }) {
   const { t } = useI18n();
   const time = showTimestamp ? formatTime(message.timestamp) : null;
@@ -573,6 +581,12 @@ function AssistantMessageView({
           <BlockView key={`${entryId ?? "stream"}-${originalIndex}`} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
         ))}
       </div>
+
+      {runningToolLabel && blocks.some((block) => block.type === "toolCall" && runningToolCallIds?.has((block as ToolCallContent).toolCallId)) && (
+        <div className="pt-1 text-[13px] text-text-muted">
+          <span className="animate-[pulse_1.5s_infinite]">{runningToolLabel}</span>
+        </div>
+      )}
 
       {showActions && <div style={{
         display: "flex", alignItems: "center", gap: 3, marginTop: 4,
