@@ -132,9 +132,19 @@ function withAssistantBlocks(
   return next;
 }
 
-function ProcessDetailsGroup({ messageCount, toolCallCount, children, t }: { messageCount: number; toolCallCount: number; children: ReactNode; t: (key: string, params?: Record<string, string | number>) => string }) {
+function formatDuration(durationMs: number, t: (key: string, params?: Record<string, string | number>) => string): string {
+  const totalSeconds = Math.max(1, Math.round(durationMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}${t("chat.hourShort")} ${minutes}${t("chat.minuteShort")}`;
+  if (minutes > 0) return `${minutes}${t("chat.minuteShort")} ${seconds}${t("chat.secondShort")}`;
+  return `${seconds}${t("chat.secondShort")}`;
+}
+
+function ProcessDetailsGroup({ durationMs, toolCallCount, children, t }: { durationMs: number; toolCallCount: number; children: ReactNode; t: (key: string, params?: Record<string, string | number>) => string }) {
   const [expanded, setExpanded] = useState(false);
-  const parts = [t("chat.processDetails"), `${messageCount} ${t(messageCount === 1 ? "chat.message" : "chat.messages")}`];
+  const parts = [t("chat.workedFor", { duration: formatDuration(durationMs, t) })];
   if (toolCallCount > 0) parts.push(`${toolCallCount} ${t(toolCallCount === 1 ? "chat.toolCall" : "chat.toolCalls")}`);
 
   return (
@@ -663,8 +673,8 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     ?? (finalAnswerMessage ? undefined : visibleRefIndexByMessage.get(finalAssistantIdx));
                   const processGroup = (
                     <ProcessDetailsGroup
-                       messageCount={processCount}
-                       t={t}
+                      durationMs={finalAssistant.timestamp! - msg.timestamp!}
+                      t={t}
                       toolCallCount={countToolCalls(messages, visibleProcessIndices) + countToolCallBlocks(finalSplit.processBlocks)}
                     >
                       {visibleProcessIndices.map((processIdx) => renderMessage(processIdx, { attachRef: false, keyPrefix: "process", showActions: false }))}
