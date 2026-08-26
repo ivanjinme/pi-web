@@ -1539,8 +1539,8 @@ span.linenumber {
   user-select: none;
 }
 
-/* 720px content + 64px clear space on each side, minus the boundary pixel. */
-@container (max-width: 847px) {
+/* Hide only when the chat area is too narrow for the rail itself. */
+@container (max-width: 400px) {
   .chat-history-rail {
     display: none;
   }

@@ -189,6 +189,7 @@ function ProcessDetailsGroup({ durationMs, toolCallCount, children, t }: { durat
 export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, playDoneSound, unlockAudio }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
+  const isMinimapHidden = useIsMobile(400);
   const wrappedOnAgentEnd = useCallback(() => {
     playDoneSound();
     onAgentEnd?.();
@@ -500,7 +501,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             <NoticeShelf notices={notices} floating align="right" />
           </div>
         </div>
-        {isMobile ? null : (
+        {isMinimapHidden ? null : (
           <ChatMinimap
             messages={messages}
             streamingMessage={streamState.streamingMessage}
