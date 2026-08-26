@@ -1539,10 +1539,19 @@ span.linenumber {
   user-select: none;
 }
 
-/* Hide only when the chat area is too narrow for the rail itself. */
 @container (max-width: 400px) {
   .chat-history-rail {
     display: none;
+  }
+}
+
+@container (min-width: 401px) and (max-width: 847px) {
+  .chat-history-rail {
+    width: 24px;
+  }
+
+  .chat-history-rail-mark {
+    max-width: 10px;
   }
 }
 
@@ -1566,6 +1575,7 @@ span.linenumber {
   background: color-mix(in srgb, var(--text-dim) 52%, transparent);
   transform-origin: left center;
   transition: width 140ms ease, height 140ms ease, background 140ms ease, transform 140ms ease;
+  pointer-events: none;
 }
 
 .chat-history-rail-mark.is-visible {
