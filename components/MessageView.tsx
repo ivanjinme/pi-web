@@ -520,7 +520,13 @@ function AssistantMessageView({
     return () => clearInterval(id);
   }, [isStreaming]);
 
-  if (blocks.length === 0 && !isStreaming) return null;
+  const errorMessage = message.stopReason === "error"
+    ? (typeof message.errorMessage === "string" && message.errorMessage.trim()
+      ? message.errorMessage.trim()
+      : "Model request failed.")
+    : null;
+
+  if (blocks.length === 0 && !isStreaming && !errorMessage) return null;
 
   return (
     <div
@@ -580,6 +586,21 @@ function AssistantMessageView({
         {blockItems.map(({ block, originalIndex }) => (
           <BlockView key={`${entryId ?? "stream"}-${originalIndex}`} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
         ))}
+        {errorMessage && (
+          <div role="alert" style={{
+            border: "1px solid rgba(220,38,38,0.28)",
+            borderRadius: 7,
+            background: "rgba(220,38,38,0.06)",
+            color: "#dc2626",
+            padding: "8px 10px",
+            fontSize: 13,
+            lineHeight: 1.5,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}>
+            {errorMessage}
+          </div>
+        )}
       </div>
 
       {runningToolLabel && blocks.some((block) => block.type === "toolCall" && runningToolCallIds?.has((block as ToolCallContent).toolCallId)) && (

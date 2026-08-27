@@ -825,48 +825,6 @@ span.linenumber {
   50% { opacity: 0.5; }
 }
 
-@keyframes notice-shelf-in {
-  from {
-    opacity: 0;
-    height: 0;
-    max-height: 0;
-    min-height: 0;
-    margin-bottom: 0;
-    transform: translateY(-6px) scale(0.995);
-  }
-  to {
-    opacity: 1;
-    height: 60px;
-    max-height: 60px;
-    min-height: 60px;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes notice-shelf-out {
-  from {
-    opacity: 1;
-    height: 60px;
-    max-height: 60px;
-    min-height: 60px;
-    transform: translateY(0) scale(1);
-  }
-  to {
-    opacity: 0;
-    height: 0;
-    max-height: 0;
-    min-height: 0;
-    margin-bottom: 0;
-    transform: translateY(-5px) scale(0.995);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .notice-shelf-item {
-    animation-duration: 0.001ms !important;
-  }
-}
-
 @keyframes saved-pop {
   0%   { transform: scale(1); box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.55); }
   40%  { transform: scale(1.08); box-shadow: 0 0 0 6px rgba(74, 222, 128, 0.25); }

@@ -31,9 +31,9 @@ interface ModelOption {
 interface Props {
   onSend: (message: string, images?: AttachedImage[]) => void;
   onAbort: () => void;
-  onSteer?: (message: string, images?: AttachedImage[]) => void;
-  onFollowUp?: (message: string, images?: AttachedImage[]) => void;
-  onPromptWithStreamingBehavior?: (message: string, behavior: "steer" | "followUp", images?: AttachedImage[]) => void;
+  onSteer?: (message: string, images?: AttachedImage[]) => void | Promise<void>;
+  onFollowUp?: (message: string, images?: AttachedImage[]) => void | Promise<void>;
+  onPromptWithStreamingBehavior?: (message: string, behavior: "steer" | "followUp", images?: AttachedImage[]) => void | Promise<void>;
   isStreaming: boolean;
   model?: { provider: string; modelId: string } | null;
   isAutoModelSelection?: boolean;
@@ -42,6 +42,8 @@ interface Props {
   modelError?: string | null;
   onModelChange?: (provider: string, modelId: string) => void;
   compactResult?: CompactResultInfo | null;
+  canCompact?: boolean;
+  isCompacting?: boolean;
   toolPreset?: "none" | "default" | "full";
   onToolPresetChange?: (preset: "none" | "default" | "full") => void;
   thinkingLevel?: "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -51,7 +53,8 @@ interface Props {
   retryInfo?: { attempt: number; maxAttempts: number; errorMessage?: string } | null;
   queuedMessages?: QueuedMessages | null;
   inputHistory?: string[];
-  onRecallQueue?: () => void;
+  onRecallQueue?: () => void | Promise<void>;
+  onDeleteQueue?: () => void | Promise<void>;
   slashCommands?: SlashCommandInfo[];
   slashCommandsLoading?: boolean;
   onLoadSlashCommands?: () => Promise<SlashCommandInfo[]> | SlashCommandInfo[];
@@ -100,22 +103,34 @@ type SlashCommandPaletteItem = SlashCommandInfo | {
 
 type SlashCommandSource = SlashCommandPaletteItem["source"];
 
+function SlashCommandIcon({ command, size = 14 }: { command: SlashCommandPaletteItem; size?: number }) {
+  const builtinPaths: Record<string, React.ReactNode> = {
+    compact: <><path d="M4 7V4h3" /><path d="M16 7V4h-3" /><path d="M4 13v3h3" /><path d="M16 13v3h-3" /><path d="m7 10 3 3 3-3" /><path d="M10 7v6" /></>,
+    reload: <><path d="M15.5 7.5A6 6 0 1 0 16 12" /><path d="M15.5 4.5v3h-3" /></>,
+    name: <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h7A2.5 2.5 0 0 1 16 5.5v9a2.5 2.5 0 0 1-2.5 2.5h-7A2.5 2.5 0 0 1 4 14.5Z" /><path d="M7 7.5h6" /><path d="M7 10.5h4.5" /></>,
+    session: <><circle cx="10" cy="10" r="6.5" /><path d="M10 6.5V10l2.5 1.5" /></>,
+    copy: <><rect x="7" y="7" width="9" height="10" rx="1.5" /><path d="M4 13V4.5A1.5 1.5 0 0 1 5.5 3H13" /></>,
+  };
+  const sourcePaths: Record<Exclude<SlashCommandSource, "builtin">, React.ReactNode> = {
+    extension: <><path d="M8.2 4.2v4.1" /><path d="M5.1 8.3h6.2a2.7 2.7 0 0 1 0 5.4H10v2.1H6v-2.1H4.7a2.7 2.7 0 0 1 0-5.4Z" /><path d="M6 4.2h4.2" /></>,
+    prompt: <><path d="M5 3.5h7l3 3v10H5z" /><path d="M12 3.5v3h3" /><path d="M7.5 10h5" /><path d="M7.5 12.8h4" /></>,
+    skill: <><path d="m10 2 1.25 5.75L17 9l-5.75 1.25L10 16l-1.25-5.75L3 9l5.75-1.25Z" /><path d="m16 14 .55 2.45L19 17l-2.45.55L16 20l-.55-2.45L13 17l2.45-.55Z" /></>,
+  };
+  const paths = command.source === "builtin"
+    ? builtinPaths[command.name] ?? <><path d="M4 5.5 8.5 10 4 14.5" /><path d="M11 14.5h5" /></>
+    : sourcePaths[command.source];
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {paths}
+    </svg>
+  );
+}
+
 const BUILTIN_SLASH_COMMANDS: SlashCommandPaletteItem[] = [
   { name: "compact", description: "chat.commandCompact", source: "builtin" },
   { name: "reload", description: "chat.commandReload", source: "builtin" },
   { name: "name", description: "chat.commandName", source: "builtin" },
-  { name: "session", description: "chat.commandSession", source: "builtin" },
-  { name: "copy", description: "chat.commandCopy", source: "builtin" },
 ];
-
-const SLASH_SOURCES: SlashCommandSource[] = ["builtin", "extension", "prompt", "skill"];
-
-const SLASH_SOURCE_GROUP_LABEL_KEYS: Record<SlashCommandSource, string> = {
-  builtin: "chat.builtIn",
-  extension: "chat.extensions",
-  prompt: "chat.prompts",
-  skill: "chat.skills",
-};
 
 const SLASH_SOURCE_ORDER: Record<SlashCommandSource, number> = {
   builtin: 0,
@@ -136,6 +151,10 @@ function slashMatchRank(command: SlashCommandPaletteItem, query: string, t: (key
 
 function getSlashDescription(command: SlashCommandPaletteItem, t: (key: string) => string): string {
   return command.source === "builtin" ? t(command.description) : command.description ?? "";
+}
+
+function getSlashCommandLabel(command: SlashCommandPaletteItem): string {
+  return command.source === "skill" ? command.name.replace(/^skills?:/i, "") : command.name;
 }
 
 function imageToDraftImage(image: AttachedImage): ChatDraftImage {
@@ -160,38 +179,6 @@ function revokeImagePreview(image: AttachedImage): void {
   if (image.previewUrl.startsWith("blob:")) {
     URL.revokeObjectURL(image.previewUrl);
   }
-}
-
-function QueuedMessageRow({ kind, text }: { kind: "steer" | "follow-up"; text: string }) {
-  return (
-    <div
-      title={text}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "3px 10px",
-        fontSize: 12,
-        color: "var(--text-muted)",
-        minWidth: 0,
-      }}
-    >
-      <span
-        style={{
-          flexShrink: 0,
-          fontSize: 10,
-          fontFamily: "var(--font-mono)",
-          padding: "1px 7px",
-          borderRadius: 999,
-          border: `1px solid ${kind === "steer" ? "color-mix(in srgb, var(--accent) 45%, transparent)" : "var(--border)"}`,
-          color: kind === "steer" ? "var(--accent)" : "var(--text-dim)",
-        }}
-      >
-        {kind}
-      </span>
-      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{text}</span>
-    </div>
-  );
 }
 
 export function ModelErrorBanner({ error }: { error?: string | null }) {
@@ -241,9 +228,9 @@ export function ModelErrorBanner({ error }: { error?: string | null }) {
 
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, onModelChange,
-  compactResult, toolPreset, onToolPresetChange,
+  compactResult, canCompact = false, isCompacting = false, toolPreset, onToolPresetChange,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
-  retryInfo, queuedMessages, inputHistory = [], onRecallQueue,
+  retryInfo, queuedMessages, inputHistory = [], onRecallQueue, onDeleteQueue,
   slashCommands, slashCommandsLoading, onLoadSlashCommands,
   onBuiltinCommand,
   onAudioUnlock,
@@ -272,6 +259,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [atActiveIndex, setAtActiveIndex] = useState(0);
   const [historyMenuOpen, setHistoryMenuOpen] = useState(false);
   const [historyActiveIndex, setHistoryActiveIndex] = useState(0);
+  const [queueAction, setQueueAction] = useState<"edit" | "delete" | null>(null);
+  const [queueSubmitting, setQueueSubmitting] = useState(false);
   const [fileIndex, setFileIndex] = useState<{ cwd: string; entries: FileIndexEntry[]; truncated: boolean } | null>(null);
   const [fileIndexLoading, setFileIndexLoading] = useState(false);
   const [atServerResult, setAtServerResult] = useState<{ cwd: string; query: string; matches: FileIndexEntry[] } | null>(null);
@@ -295,6 +284,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const valueRef = useRef(value);
   const attachedImagesRef = useRef(attachedImages);
   const pendingImageCountRef = useRef(0);
+  const queueSubmitRef = useRef(false);
+  const queueSubmitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   valueRef.current = value;
   attachedImagesRef.current = attachedImages;
 
@@ -463,6 +454,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   useEffect(() => {
     return () => {
       attachedImagesRef.current.forEach(revokeImagePreview);
+      if (queueSubmitTimeoutRef.current) clearTimeout(queueSubmitTimeoutRef.current);
     };
   }, []);
 
@@ -472,11 +464,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     if (isStreaming) return;
     onAudioUnlock?.();
     if (!attachedImages.length && msg.startsWith("/") && onBuiltinCommand) {
+      clearInput();
       const result = await onBuiltinCommand(msg);
-      if (result.handled) {
-        if (!result.error) clearInput();
-        return;
-      }
+      if (result.handled) return;
+      onSend(msg);
+      return;
     }
     onSend(msg, attachedImages.length ? attachedImages : undefined);
     clearInput();
@@ -488,7 +480,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
   const filteredSlashCommands = (() => {
     if (slashQuery === null) return [];
-    const commands = [...(isStreaming ? [] : BUILTIN_SLASH_COMMANDS), ...(slashCommands ?? [])];
+    const builtinCommands = isStreaming
+      ? []
+      : BUILTIN_SLASH_COMMANDS.filter((command) => command.name !== "compact" || (canCompact && !isCompacting));
+    const commands = [...builtinCommands, ...(slashCommands ?? [])];
     return [...commands]
       .filter((command) => {
         const name = command.name.toLowerCase();
@@ -503,24 +498,43 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       });
   })();
 
-  const groupedSlashCommands = (() => {
-    const groups = new Map<SlashCommandSource, { source: SlashCommandSource; items: { command: SlashCommandPaletteItem; index: number }[] }>();
-    for (const source of SLASH_SOURCES) {
-      groups.set(source, { source, items: [] });
-    }
-    filteredSlashCommands.forEach((command, index) => {
-      groups.get(command.source)?.items.push({ command, index });
-    });
-    return SLASH_SOURCES
-      .map((source) => groups.get(source)!)
-      .filter((group) => group.items.length > 0);
-  })();
-
   const slashCommandCountLabel = filteredSlashCommands.length === 1
     ? t(slashQuery ? "chat.match" : "chat.command")
     : t(slashQuery ? "chat.matches" : "chat.commands", { count: filteredSlashCommands.length });
   const hasInputText = Boolean(value.trim());
-  const canQueueStreamingMessage = hasInputText && attachedImages.length === 0;
+  const queuedEntries = [
+    ...(queuedMessages?.steering ?? []).map((text) => ({ kind: "steer" as const, text })),
+    ...(queuedMessages?.followUp ?? []).map((text) => ({ kind: "followUp" as const, text })),
+  ];
+  const hasQueuedMessage = queuedEntries.length > 0;
+  const canQueueStreamingMessage = hasInputText && attachedImages.length === 0 && !hasQueuedMessage && !queueSubmitting;
+  const willSendSteer = isStreaming && !isCompacting && Boolean(onSteer) && canQueueStreamingMessage;
+  const queueIconButtonStyle: React.CSSProperties = {
+    display: "grid", placeItems: "center", width: 25, height: 25, padding: 0,
+    border: "none", borderRadius: 6, background: "transparent",
+    color: "var(--text-dim)", cursor: queueAction ? "not-allowed" : "pointer",
+  };
+
+  useEffect(() => {
+    if (!hasQueuedMessage) setQueueAction(null);
+    if (hasQueuedMessage || !isStreaming) {
+      queueSubmitRef.current = false;
+      setQueueSubmitting(false);
+      if (queueSubmitTimeoutRef.current) clearTimeout(queueSubmitTimeoutRef.current);
+      queueSubmitTimeoutRef.current = null;
+    }
+  }, [hasQueuedMessage, isStreaming]);
+
+  const runQueueAction = useCallback(async (action: "edit" | "delete") => {
+    const handler = action === "edit" ? onRecallQueue : onDeleteQueue;
+    if (!handler || queueAction) return;
+    setQueueAction(action);
+    try {
+      await handler();
+    } finally {
+      setQueueAction(null);
+    }
+  }, [onDeleteQueue, onRecallQueue, queueAction]);
 
   // ── @ file autocomplete ──────────────────────────────────────────────────
   // Recomputed from the text before the caret on every change/caret move.
@@ -704,24 +718,47 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     });
   }, []);
 
-  const sendQueued = useCallback((mode: "steer" | "followup") => {
+  const sendQueued = useCallback(async (mode: "steer" | "followup") => {
     const msg = value.trim();
     if (!msg && !attachedImages.length) return;
-    if (attachedImages.length) return;
-    onAudioUnlock?.();
+    if (attachedImages.length || hasQueuedMessage || queueSubmitRef.current) return;
     const streamingBehavior = mode === "steer" ? "steer" : "followUp";
-    if (msg.startsWith("/") && onPromptWithStreamingBehavior) {
-      onPromptWithStreamingBehavior(msg, streamingBehavior, attachedImages.length ? attachedImages : undefined);
-      clearInput();
+    const handler = msg.startsWith("/") && onPromptWithStreamingBehavior
+      ? () => onPromptWithStreamingBehavior(msg, streamingBehavior)
+      : mode === "steer" && onSteer
+        ? () => onSteer(msg)
+        : onFollowUp
+          ? () => onFollowUp(msg)
+          : null;
+    if (!handler) return;
+
+    queueSubmitRef.current = true;
+    setQueueSubmitting(true);
+    onAudioUnlock?.();
+    clearInput();
+    try {
+      await handler();
+    } catch {
+      queueSubmitRef.current = false;
+      setQueueSubmitting(false);
+      setValue((current) => {
+        if (!current.trim()) return msg;
+        if (current.trim() === msg) return current;
+        return `${msg}\n\n${current}`;
+      });
+      requestAnimationFrame(() => textareaRef.current?.focus());
       return;
     }
-    if (mode === "steer" && onSteer) {
-      onSteer(msg, attachedImages.length ? attachedImages : undefined);
-    } else if (mode === "followup" && onFollowUp) {
-      onFollowUp(msg, attachedImages.length ? attachedImages : undefined);
-    }
-    clearInput();
-  }, [value, attachedImages, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock]);
+
+    // queue_update is authoritative. Keep the synchronous guard until that
+    // event arrives; the timeout only recovers from a failed/missed request.
+    if (queueSubmitTimeoutRef.current) clearTimeout(queueSubmitTimeoutRef.current);
+    queueSubmitTimeoutRef.current = setTimeout(() => {
+      queueSubmitRef.current = false;
+      setQueueSubmitting(false);
+      queueSubmitTimeoutRef.current = null;
+    }, 5000);
+  }, [value, attachedImages, hasQueuedMessage, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock]);
 
   const getNextSlashIndex = useCallback((direction: "up" | "down" | "left" | "right") => {
     const lastIndex = filteredSlashCommands.length - 1;
@@ -879,15 +916,19 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
+        // Pi has a separate compaction operation, not an active agent turn.
+        // Keep Enter from submitting a normal prompt until it completes.
+        if (isCompacting) return;
         if (isStreaming && (onSteer || onFollowUp)) {
-          // Default Enter sends as steer if available, else followup
-          sendQueued(onSteer ? "steer" : "followup");
+          if (hasQueuedMessage) return;
+          if (e.altKey && onFollowUp) sendQueued("followup");
+          else sendQueued(onSteer ? "steer" : "followup");
         } else {
           handleSend();
         }
       }
     },
-    [isStreaming, onSteer, onFollowUp, onAbort, slashMenuOpen, slashQuery, filteredSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
+    [isStreaming, isCompacting, onSteer, onFollowUp, onAbort, hasQueuedMessage, slashMenuOpen, slashQuery, filteredSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
   );
 
   const handleInput = useCallback(() => {
@@ -1003,8 +1044,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   }, []);
 
   useEffect(() => {
-    if (!isMobile) setControlsMenuOpen(false);
-  }, [isMobile]);
+    if (!isMobile || isStreaming) setControlsMenuOpen(false);
+  }, [isMobile, isStreaming]);
 
 
 
@@ -1019,74 +1060,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     >
       <div className="chat-content-column">
         <ModelErrorBanner error={modelError} />
-        {/* Queued steering / follow-up messages (delivered by pi on upcoming turns) */}
-        {((queuedMessages?.steering.length ?? 0) + (queuedMessages?.followUp.length ?? 0)) > 0 && (
-          <div style={{
-            marginBottom: 8,
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            background: "var(--bg-panel)",
-            padding: "5px 0",
-          }}>
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 8,
-              padding: "2px 8px 4px 10px",
-            }}>
-              <span style={{
-                fontSize: 10,
-                fontFamily: "var(--font-mono)",
-                color: "var(--text-dim)",
-                textTransform: "uppercase",
-                letterSpacing: 0.4,
-              }}>
-                {t("chat.queued", { count: (queuedMessages?.steering.length ?? 0) + (queuedMessages?.followUp.length ?? 0) })}
-              </span>
-              {onRecallQueue && (
-                <button
-                  onClick={onRecallQueue}
-                   title={t("chat.recallTitle")}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "4px 12px",
-                    fontSize: 12,
-                    color: "var(--text)",
-                    background: "transparent",
-                    border: "1px solid var(--border)",
-                    borderRadius: 7,
-                    cursor: "pointer",
-                    transition: "background 0.12s, border-color 0.12s",
-                    whiteSpace: "nowrap",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = "var(--bg-hover)";
-                    e.currentTarget.style.borderColor = "color-mix(in srgb, var(--accent) 45%, var(--border))";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = "transparent";
-                    e.currentTarget.style.borderColor = "var(--border)";
-                  }}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="9 14 4 9 9 4" />
-                    <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
-                  </svg>
-                   {t("chat.recall")}
-                </button>
-              )}
-            </div>
-            {queuedMessages?.steering.map((text, i) => (
-              <QueuedMessageRow key={`steer-${i}`} kind="steer" text={text} />
-            ))}
-            {queuedMessages?.followUp.map((text, i) => (
-              <QueuedMessageRow key={`followup-${i}`} kind="follow-up" text={text} />
-            ))}
-          </div>
-        )}
         {/* Retry banner */}
         {retryInfo && (
           <div style={{
@@ -1146,7 +1119,90 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         )}
 
         {/* Main input */}
-        <div style={{ position: "relative" }}>
+        <div style={{ position: "relative", isolation: "isolate" }}>
+          {/* Absolute overlay: queue changes never alter composer/page height. */}
+          {queuedEntries.length > 0 && (
+            <div style={{
+              position: "absolute",
+              left: 14,
+              right: 14,
+              bottom: "calc(100% - 9px)",
+              zIndex: 0,
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+            }}>
+              {queuedEntries.map((entry, index) => {
+                const status = entry.kind === "steer" ? t("chat.steer") : t("chat.followUp");
+                const busy = queueAction !== null;
+                return (
+                  <div
+                    key={`${entry.kind}-${index}-${entry.text}`}
+                    aria-busy={busy}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      width: "100%",
+                      gap: 10,
+                      minHeight: 46,
+                      padding: "9px 11px 15px 12px",
+                      border: "1px solid var(--border)",
+                      borderRadius: "16px 16px 8px 8px",
+                      background: "var(--bg-panel)",
+                      boxShadow: "0 -5px 18px -14px rgba(15,23,42,0.38)",
+                      color: "var(--text)",
+                    }}
+                  >
+                    <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
+                      <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="var(--text-dim)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
+                        <path d="M5 4v7a3 3 0 0 0 3 3h7" /><path d="m12 11 3 3-3 3" />
+                      </svg>
+                      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, lineHeight: 1.45 }}>
+                        {entry.text}
+                      </span>
+                    </span>
+                    <span style={{ flexShrink: 0, color: "var(--text-muted)", fontSize: 11.5, whiteSpace: "nowrap" }}>
+                      {status}
+                    </span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 1, flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        onClick={() => void runQueueAction("edit")}
+                        disabled={busy || !onRecallQueue}
+                        title={t("chat.editQueued")}
+                        aria-label={t("chat.editQueued")}
+                        style={queueIconButtonStyle}
+                      >
+                        {queueAction === "edit" ? (
+                          <span className="animate-spin" style={{ width: 12, height: 12, border: "1.5px solid currentColor", borderRightColor: "transparent", borderRadius: "50%" }} />
+                        ) : (
+                          <svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M4 14.5 3.5 17l2.5-.5L15.5 7 13 4.5Z" /><path d="m11.8 5.7 2.5 2.5" />
+                          </svg>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void runQueueAction("delete")}
+                        disabled={busy || !onDeleteQueue}
+                        title={t("chat.deleteQueued")}
+                        aria-label={t("chat.deleteQueued")}
+                        style={queueIconButtonStyle}
+                      >
+                        {queueAction === "delete" ? (
+                          <span className="animate-spin" style={{ width: 12, height: 12, border: "1.5px solid currentColor", borderRightColor: "transparent", borderRadius: "50%" }} />
+                        ) : (
+                          <svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M4 6h12" /><path d="m8 3h4l1 3H7Z" /><path d="m6 6 .7 10h6.6L14 6" />
+                          </svg>
+                        )}
+                      </button>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {historyMenuOpen && inputHistory.length > 0 && (
             <div
               ref={historyMenuRef}
@@ -1236,6 +1292,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           )}
           {slashMenuOpen && slashQuery !== null && (
             <div
+              role="listbox"
+              aria-label={t("chat.slashCommands", { label: slashCommandCountLabel })}
               style={{
                 position: "absolute",
                 left: 0,
@@ -1247,118 +1305,68 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 borderRadius: 8,
                 boxShadow: "0 -6px 20px rgba(0,0,0,0.12)",
                 overflow: "hidden",
-                maxHeight: "min(56vh, 460px)",
+                maxHeight: "min(48vh, 400px)",
               }}
             >
-              <div
-                style={{
-                  padding: "8px 10px",
-                  borderBottom: "1px solid var(--border)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 8,
-                  fontSize: 11,
-                  color: "var(--text-dim)",
-                }}
-              >
-                 <span>{slashCommandsLoading ? t("chat.loadingCommands") : t("chat.slashCommands", { label: slashCommandCountLabel })}</span>
-                 <span style={{ fontFamily: "var(--font-mono)" }}>{t("chat.tabEnter")}</span>
-              </div>
-              <div style={{ maxHeight: "calc(min(56vh, 460px) - 34px)", overflowY: "auto", padding: 10 }}>
+              <div style={{ maxHeight: "min(48vh, 400px)", overflowY: "auto", padding: 4 }}>
                 {!slashCommandsLoading && filteredSlashCommands.length === 0 ? (
-                  <div style={{ padding: "2px 2px 4px", fontSize: 12, color: "var(--text-dim)" }}>
-                     {t("chat.noCommands")}
+                  <div style={{ padding: "6px 8px", fontSize: 12, color: "var(--text-dim)" }}>
+                    {t("chat.noCommands")}
                   </div>
                 ) : (
-                  groupedSlashCommands.map((group) => (
-                    <section key={group.source} style={{ marginBottom: 12 }}>
-                      <div
-                        style={{
-                          position: "sticky",
-                          top: -10,
-                          zIndex: 1,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: 8,
-                          padding: "4px 0 6px",
-                          background: "var(--bg)",
-                          color: "var(--text-dim)",
-                          fontSize: 10,
-                          fontWeight: 600,
-                          textTransform: "uppercase",
-                        }}
-                      >
-                           <span>{t(SLASH_SOURCE_GROUP_LABEL_KEYS[group.source])}</span>
-                        <span style={{ fontFamily: "var(--font-mono)", fontWeight: 500 }}>{group.items.length}</span>
-                      </div>
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                          gap: 8,
-                        }}
-                      >
-                        {group.items.map(({ command, index }) => {
-                          const active = index === slashActiveIndex;
-                          return (
-                            <button
-                              key={`${command.source}:${command.name}`}
-                              ref={(node) => {
-                                slashItemRefs.current[index] = node;
-                              }}
-                              type="button"
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                applySlashCommand(command);
-                              }}
-                              onMouseEnter={() => setSlashActiveIndex(index)}
-                              style={{
-                                width: "100%",
-                                minWidth: 0,
-                                minHeight: 58,
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: 4,
-                                justifyContent: "center",
-                                padding: "9px 10px",
-                                border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
-                                borderRadius: 7,
-                                background: active ? "var(--bg-selected)" : "var(--bg-panel)",
-                                color: "var(--text)",
-                                cursor: "pointer",
-                                textAlign: "left",
-                                boxShadow: active ? "0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent)" : "none",
-                              }}
-                            >
-                              <span style={{
-                                fontSize: 13,
-                                fontFamily: "var(--font-mono)",
-                                overflowWrap: "anywhere",
-                                wordBreak: "break-word",
-                              }}>
-                                /{command.name}
-                              </span>
-                               {command.description && (
-                                <span style={{
-                                  display: "-webkit-box",
-                                  WebkitBoxOrient: "vertical",
-                                  WebkitLineClamp: 2,
-                                  overflow: "hidden",
-                                  fontSize: 11,
-                                  lineHeight: 1.35,
-                                  color: "var(--text-dim)",
-                                }}>
-                                   {getSlashDescription(command, t)}
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  ))
+                  filteredSlashCommands.map((command, index) => {
+                    const active = index === slashActiveIndex;
+                    const startsSkillGroup = command.source === "skill" && filteredSlashCommands[index - 1]?.source !== "skill";
+                    return (
+                      <React.Fragment key={`${command.source}:${command.name}`}>
+                        {startsSkillGroup && (
+                          <div style={{ padding: "7px 8px 4px", color: "var(--text-muted)", fontSize: 12, fontWeight: 500 }}>
+                            {t("chat.skills")}
+                          </div>
+                        )}
+                        <button
+                          ref={(node) => {
+                            slashItemRefs.current[index] = node;
+                          }}
+                          type="button"
+                          role="option"
+                          aria-selected={active}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            applySlashCommand(command);
+                          }}
+                          onMouseEnter={() => setSlashActiveIndex(index)}
+                          style={{
+                            width: "100%",
+                            minWidth: 0,
+                            display: "grid",
+                            gridTemplateColumns: "14px minmax(88px, auto) minmax(0, 1fr)",
+                            alignItems: "center",
+                            columnGap: 8,
+                            padding: "6px 8px",
+                            border: "none",
+                            borderRadius: 6,
+                            background: active ? "var(--bg-selected)" : "none",
+                            color: "var(--text)",
+                            cursor: "pointer",
+                            textAlign: "left",
+                            fontSize: 12.5,
+                            lineHeight: 1.45,
+                          }}
+                        >
+                          <span style={{ color: active ? "var(--accent)" : "var(--text-muted)", display: "flex", alignItems: "center" }}>
+                            <SlashCommandIcon command={command} />
+                          </span>
+                          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {getSlashCommandLabel(command)}
+                          </span>
+                          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-dim)", textAlign: "right" }}>
+                            {getSlashDescription(command, t)}
+                          </span>
+                        </button>
+                      </React.Fragment>
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -1462,12 +1470,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           })()}
           <div
             style={{
+              position: "relative",
+              zIndex: 1,
               display: "flex",
               gap: 8,
               alignItems: "center",
               background: "var(--bg)",
               border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
-              borderRadius: 14,
+              borderRadius: 16,
               padding: "10px 10px 10px 14px",
               boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.10)",
               transition: "border-color 0.15s, background 0.15s, box-shadow 0.15s",
@@ -1498,10 +1508,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             onInput={handleInput}
             onPaste={handlePaste}
             placeholder={
-              isStreaming && (onSteer || onFollowUp)
-                ? t("chat.steerPlaceholder")
-                : isStreaming ? t("chat.agentPlaceholder")
-                : t("chat.messagePlaceholder")
+              isCompacting
+                ? t("chat.compacting")
+                : isStreaming && (onSteer || onFollowUp)
+                  ? t("chat.steerPlaceholder")
+                  : isStreaming ? t("chat.agentPlaceholder")
+                  : t("chat.messagePlaceholder")
             }
             rows={1}
             style={{
@@ -1520,84 +1532,47 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             }}
           />
 
-          {isStreaming ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, alignSelf: "flex-end" }}>
-              {onSteer && (
-                <button
-                  onClick={() => sendQueued("steer")}
-                  disabled={!canQueueStreamingMessage}
-                  title={attachedImages.length ? "Image attachments cannot be queued while the agent is running" : "Interrupt the current run and inject this message now"}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 5,
-                    padding: "7px 12px",
-                    background: canQueueStreamingMessage ? "rgba(234,179,8,0.12)" : "none",
-                    border: "1px solid rgba(234,179,8,0.35)",
-                    borderRadius: 8,
-                    color: canQueueStreamingMessage ? "rgba(180,130,0,1)" : "var(--text-dim)",
-                    cursor: canQueueStreamingMessage ? "pointer" : "not-allowed",
-                    fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
-                    transition: "background 0.12s",
-                  }}
-                >
-                  <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M5 1 L9 5 L5 9" /><line x1="1" y1="5" x2="9" y2="5" />
-                  </svg>
-                  {t("chat.steer")}
-                </button>
-              )}
-              {onFollowUp && (
-                <button
-                  onClick={() => sendQueued("followup")}
-                  disabled={!canQueueStreamingMessage}
-                  title={attachedImages.length ? "Image attachments cannot be queued while the agent is running" : "Queue this message after the agent finishes"}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 5,
-                    padding: "7px 12px",
-                    background: canQueueStreamingMessage ? "rgba(129,140,248,0.12)" : "none",
-                    border: "1px solid rgba(129,140,248,0.35)",
-                    borderRadius: 8,
-                    color: canQueueStreamingMessage ? "rgba(99,102,241,1)" : "var(--text-dim)",
-                    cursor: canQueueStreamingMessage ? "pointer" : "not-allowed",
-                    fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
-                    transition: "background 0.12s",
-                  }}
-                >
-                  <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="5" y1="1" x2="5" y2="6" /><polyline points="2.5 3.5 5 1 7.5 3.5" />
-                    <line x1="2" y1="9" x2="8" y2="9" />
-                  </svg>
-                  {t("chat.followUp")}
-                </button>
-              )}
-            </div>
-          ) : (
-            <button
-              onClick={handleSend}
-              disabled={!value.trim() && !attachedImages.length}
-              style={{
-                flexShrink: 0,
-                alignSelf: "flex-end",
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "7px 14px",
-                background: (value.trim() || attachedImages.length) ? "var(--accent)" : "var(--bg-panel)",
-                border: "none",
-                borderRadius: 8,
-                color: (value.trim() || attachedImages.length) ? "#fff" : "var(--text-dim)",
-                cursor: (value.trim() || attachedImages.length) ? "pointer" : "not-allowed",
-                fontSize: 13,
-                fontWeight: 600,
-                letterSpacing: "-0.01em",
-                boxShadow: (value.trim() || attachedImages.length) ? "0 1px 3px color-mix(in srgb, var(--accent) 24%, transparent)" : "none",
-                transition: "background 0.15s, box-shadow 0.15s",
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="2" y1="7" x2="11" y2="7" />
-                <polyline points="7.5 3 12 7 7.5 11" />
+          <button
+            type="button"
+            onClick={willSendSteer ? () => sendQueued("steer") : isStreaming ? onAbort : handleSend}
+            disabled={!isStreaming && !value.trim() && !attachedImages.length}
+            title={willSendSteer ? `${t("chat.steer")} · Enter` : isCompacting ? t("chat.stopCompaction") : isStreaming ? t("chat.stopAgent") : t("chat.send")}
+            aria-label={willSendSteer ? t("chat.steer") : isCompacting ? t("chat.stopCompaction") : isStreaming ? t("chat.stopAgent") : t("chat.send")}
+            style={{
+              flexShrink: 0,
+              alignSelf: "flex-end",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 34,
+              height: 34,
+              padding: 0,
+              background: willSendSteer
+                ? "var(--accent)"
+                : isStreaming
+                  ? "color-mix(in srgb, #ef4444 10%, transparent)"
+                  : (value.trim() || attachedImages.length) ? "var(--accent)" : "var(--bg-panel)",
+              border: isStreaming && !willSendSteer ? "1px solid color-mix(in srgb, #ef4444 32%, transparent)" : "1px solid transparent",
+              borderRadius: 9,
+              color: willSendSteer ? "#fff" : isStreaming ? "#ef4444" : (value.trim() || attachedImages.length) ? "#fff" : "var(--text-dim)",
+              cursor: isStreaming || value.trim() || attachedImages.length ? "pointer" : "not-allowed",
+              boxShadow: (willSendSteer || (!isStreaming && (value.trim() || attachedImages.length)))
+                ? "0 1px 3px color-mix(in srgb, var(--accent) 24%, transparent)"
+                : "none",
+              transition: "background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s",
+            }}
+          >
+            {isStreaming && !willSendSteer ? (
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <rect x="2" y="2" width="8" height="8" rx="1.5" fill="currentColor" />
               </svg>
-              {t("chat.send")}
-            </button>
-          )}
+            ) : (
+              <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="7.5" y1="12.5" x2="7.5" y2="2.5" />
+                <polyline points="3.5 6.5 7.5 2.5 11.5 6.5" />
+              </svg>
+            )}
+          </button>
           </div>
         </div>
 
@@ -1750,7 +1725,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             position: "relative",
             marginLeft: isMobile ? 0 : "auto",
           }}>
-            {isMobile && (
+            {isMobile && !isStreaming && (
               <button
                 type="button"
                  title={controlsMenuOpen ? undefined : t("chat.moreControls")}
@@ -1979,33 +1954,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </div>
             )}
 
-
-            {isStreaming && (
-              <button
-                onClick={onAbort}
-                 title={t("chat.stopAgent")}
-                style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  padding: "8px 14px",
-                  height: 32,
-                  background: "rgba(239,68,68,0.08)",
-                  border: "1px solid rgba(239,68,68,0.3)",
-                  borderRadius: 9,
-                  color: "#ef4444",
-                  cursor: "pointer",
-                  fontSize: 12, fontWeight: 600,
-                  whiteSpace: "nowrap", letterSpacing: "-0.01em",
-                  transition: "background 0.12s",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.16)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.08)"; }}
-              >
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                  <rect x="1.5" y="1.5" width="7" height="7" rx="1.5" fill="currentColor" />
-                </svg>
-                 {t("chat.stop")}
-              </button>
-            )}
 
             {isMobile && controlsMenuOpen && (
               <button

@@ -29,6 +29,7 @@ interface RenderMessageOptions {
   showTimestamp?: boolean;
   allowFork?: boolean;
   showActions?: boolean;
+  showNotices?: boolean;
 }
 
 interface Props {
@@ -42,7 +43,6 @@ interface Props {
   onBranchDataChange?: (tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => void;
   onSystemPromptChange?: (prompt: string | null) => void;
   onSessionStatsChange?: (stats: SessionStatsInfo | null) => void;
-  onSessionStatsPanelOpen?: () => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
   onOpenFile?: (filePath: string) => void;
   playDoneSound: () => void;
@@ -186,9 +186,8 @@ function ProcessDetailsGroup({ durationMs, toolCallCount, children, t }: { durat
   );
 }
 
-export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, playDoneSound, unlockAudio }: Props) {
+export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onContextUsageChange, onOpenFile, playDoneSound, unlockAudio }: Props) {
   const { t } = useI18n();
-  const isMobile = useIsMobile();
   const isMinimapHidden = useIsMobile(400);
   const wrappedOnAgentEnd = useCallback(() => {
     playDoneSound();
@@ -199,7 +198,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     loading, error, messages, entryIds, streamState,
     agentRunning, bashRunning, pendingBash, modelNames, modelList, modelError, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
     retryInfo, contextUsage, forkingEntryId,
-    compactResult, displayModel: displayModelValue, sessionStats,
+    isCompacting, compactResult, displayModel: displayModelValue, sessionStats,
     slashCommands, slashCommandsLoading, queuedMessages,
     notices, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
     isAutoModelSelection,
@@ -209,14 +208,15 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     lastUserMsgRef,
     handleSend, handleAbort, handleFork, handleEditFromHere, handleModelChange,
     handleSteer, handleFollowUp, handlePromptWithStreamingBehavior,
-    handleRecallQueue,
+    handleRecallQueue, handleDeleteQueue,
     handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands,
   } = useAgentSession({
     session, newSessionCwd, onAgentEnd: wrappedOnAgentEnd, onSessionCreated, onSessionForked,
-    modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsPanelOpen,
+    modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange,
   });
-  const sessionBusy = agentRunning || bashRunning;
+  const sessionBusy = agentRunning || bashRunning || isCompacting;
+  const canCompact = messages.some((message) => message.role === "assistant" && (message as AssistantMessage).stopReason !== "error");
   const runningToolLabel = agentPhase?.kind === "running_tools" ? phaseLabel(agentPhase, t) : undefined;
   const runningToolCallIds = useMemo(
     () => agentPhase?.kind === "running_tools" ? new Set(agentPhase.tools.map((tool) => tool.id)) : undefined,
@@ -370,6 +370,8 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       modelError={modelError}
       onModelChange={handleModelChange}
       compactResult={compactResult}
+      canCompact={canCompact}
+      isCompacting={isCompacting}
       toolPreset={toolPreset}
       onToolPresetChange={session || isNew ? handleToolPresetChange : undefined}
       thinkingLevel={thinkingLevel}
@@ -380,6 +382,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       queuedMessages={queuedMessages}
       inputHistory={inputHistory}
       onRecallQueue={handleRecallQueue}
+      onDeleteQueue={handleDeleteQueue}
       slashCommands={slashCommands}
       slashCommandsLoading={slashCommandsLoading}
       onLoadSlashCommands={loadSlashCommands}
@@ -479,28 +482,13 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             >
               What’s on your mind today?
             </div>
-            <NoticeShelf notices={notices} align="right" />
+            <NoticeShelf notices={notices} />
             {chatInputElement}
           </div>
         </div>
       ) : (
       <>
       <div className="chat-conversation-region relative flex flex-1 overflow-hidden">
-        <div
-          className="chat-content-gutter"
-          style={{
-            position: "absolute",
-            top: 12,
-            left: 0,
-            right: 0,
-            zIndex: 40,
-            pointerEvents: "none",
-          }}
-        >
-          <div className="chat-content-column">
-            <NoticeShelf notices={notices} floating align="right" />
-          </div>
-        </div>
         {isMinimapHidden ? null : (
           <ChatMinimap
             messages={messages}
@@ -549,6 +537,24 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 if (idx === lastUserIdx) { (lastUserMsgRef as { current: HTMLDivElement | null }).current = el; }
               };
 
+              const noticesByMessageIndex = new Map<number, NoticeItem[]>();
+              for (const notice of notices) {
+                let anchorIndex = -1;
+                for (let candidateIndex = messages.length - 1; candidateIndex >= 0; candidateIndex--) {
+                  const timestamp = (messages[candidateIndex] as AgentMessage & { timestamp?: number }).timestamp;
+                  if (timestamp === undefined || timestamp <= notice.createdAt) {
+                    anchorIndex = candidateIndex;
+                    break;
+                  }
+                }
+                if (anchorIndex >= 0) {
+                  noticesByMessageIndex.set(anchorIndex, [
+                    ...(noticesByMessageIndex.get(anchorIndex) ?? []),
+                    notice,
+                  ]);
+                }
+              }
+
               const renderMessage = (idx: number, options: RenderMessageOptions = {}): ReactNode => {
                 const msg = options.messageOverride ?? messages[idx];
                 const isVisible = msg.role === "user" || msg.role === "assistant";
@@ -589,10 +595,23 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     runningToolCallIds={runningToolCallIds}
                   />
                 );
-                if (!isVisible || options.attachRef === false || currentRefIdx === undefined) return view;
+                const messageNotices = options.showNotices === false ? [] : noticesByMessageIndex.get(idx) ?? [];
+                const showCompacting = isCompacting && idx === messages.length - 1 && options.showNotices !== false;
+                const viewWithNotices = messageNotices.length > 0 || showCompacting ? (
+                  <Fragment key={`${keyPrefix}-with-notices-${idx}`}>
+                    {view}
+                    <NoticeShelf notices={messageNotices} />
+                    {showCompacting && (
+                      <div className="py-2 text-[13px] text-text-muted">
+                        <span className="animate-[pulse_1.5s_infinite]">{t("chat.compacting")}</span>
+                      </div>
+                    )}
+                  </Fragment>
+                ) : view;
+                if (!isVisible || options.attachRef === false || currentRefIdx === undefined) return viewWithNotices;
                 return (
                   <div key={`${keyPrefix}-${idx}`} ref={attachVisibleRef(idx, currentRefIdx)}>
-                    {view}
+                    {viewWithNotices}
                   </div>
                 );
               };
@@ -661,7 +680,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                       t={t}
                       toolCallCount={countToolCalls(messages, visibleProcessIndices) + countToolCallBlocks(finalSplit.processBlocks)}
                     >
-                      {visibleProcessIndices.map((processIdx) => renderMessage(processIdx, { attachRef: false, keyPrefix: "process", showActions: false }))}
+                      {visibleProcessIndices.map((processIdx) => renderMessage(processIdx, { attachRef: false, keyPrefix: "process", showActions: false, showNotices: false }))}
                       {finalProcessMessage && renderMessage(finalAssistantIdx, {
                         attachRef: false,
                         keyPrefix: "process-final",
@@ -669,6 +688,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                         showTimestamp: false,
                         allowFork: !finalAnswerMessage,
                         showActions: false,
+                        showNotices: false,
                       })}
                     </ProcessDetailsGroup>
                   );
@@ -792,68 +812,21 @@ function ExtensionWidgets({ widgets }: { widgets: Array<{ key: string; lines: st
   );
 }
 
-function NoticeShelf({ notices, floating = false, align = "left" }: { notices: NoticeItem[]; floating?: boolean; align?: "left" | "right" }) {
+function NoticeShelf({ notices }: { notices: NoticeItem[] }) {
   if (notices.length === 0) return null;
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: align === "right" ? "flex-end" : "stretch",
-        marginBottom: floating ? 0 : 10,
-      }}
-    >
-      {notices.map((notice, index) => {
+    <div aria-live="polite" style={{ display: "flex", flexDirection: "column", gap: 4, margin: "32px 0 16px" }}>
+      {notices.map((notice) => {
         const color = notice.type === "error"
-          ? "#ef4444"
+          ? "#dc2626"
           : notice.type === "warning"
-            ? "#d97706"
+            ? "#b45309"
             : notice.type === "success"
-              ? "#10b981"
-              : "var(--accent)";
+              ? "var(--text-muted)"
+              : "var(--text-dim)";
         return (
-          <div
-            key={notice.id}
-            className="notice-shelf-item"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              minHeight: 60,
-              height: 60,
-              maxHeight: 60,
-              marginBottom: index === notices.length - 1 ? 0 : 6,
-              overflow: "hidden",
-              borderRadius: 14,
-              border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
-              background: "var(--bg)",
-              color: "var(--text-muted)",
-              width: "fit-content",
-              maxWidth: "min(100%, 620px)",
-              boxShadow: floating
-                ? "0 1px 2px rgba(15,23,42,0.05), 0 10px 28px -14px rgba(15,23,42,0.24)"
-                : "0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.10)",
-              fontSize: 18,
-              lineHeight: 1.45,
-              transformOrigin: "top center",
-              animation: notice.exiting
-                ? "notice-shelf-out 0.18s ease-in forwards"
-                : "notice-shelf-in 0.18s ease-out both",
-              padding: "0 12px",
-            }}
-          >
-            <span
-              style={{
-                width: 7,
-                height: 7,
-                borderRadius: "50%",
-                background: color,
-                flexShrink: 0,
-              }}
-            />
-            <span style={{ padding: "14px 0", minWidth: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {notice.message}
-            </span>
+          <div key={notice.id} style={{ color, fontSize: 12.5, lineHeight: 1.5 }}>
+            {notice.message}
           </div>
         );
       })}

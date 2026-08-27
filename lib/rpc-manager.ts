@@ -117,6 +117,8 @@ export class AgentSessionWrapper {
   private extensionStatuses = new Map<string, string>();
   private extensionWidgets = new Map<string, ExtensionWidgetItem>();
   private promptRunning = false;
+  private manualCompactionRunning = false;
+  private manualCompactionAbortRequested = false;
   private extensionsBound = false;
   private extensionBindingPromise: Promise<void> | null = null;
   private extensionBindingError: unknown = null;
@@ -153,6 +155,12 @@ export class AgentSessionWrapper {
       this.resetIdleTimer();
       if (event.type === "agent_end") {
         invalidateSessionListCache();
+      }
+      // compact() aborts any active agent turn before it creates its own
+      // AbortController. A Stop request can arrive during that gap, so retain
+      // it and apply it as soon as compaction actually starts.
+      if (event.type === "compaction_start" && this.manualCompactionAbortRequested) {
+        this.inner.abortCompaction();
       }
       this.emit(event);
       // Streaming / compaction / tool events flow through here; re-broadcast
@@ -360,6 +368,14 @@ export class AgentSessionWrapper {
       }
 
       case "abort":
+        if (this.manualCompactionRunning || this.inner.isCompacting) {
+          this.manualCompactionAbortRequested = true;
+          this.inner.abortCompaction();
+          // Before compact() creates its AbortController it may still be
+          // waiting for the previous agent turn to abort.
+          if (!this.inner.isCompacting) await this.inner.abort();
+          return null;
+        }
         await this.withFinalRunningNotification(() => this.inner.abort());
         return null;
 
@@ -478,11 +494,18 @@ export class AgentSessionWrapper {
       }
 
       case "compact": {
+        if (this.manualCompactionRunning || this.inner.isCompacting) {
+          throw new Error("Compaction already in progress");
+        }
+        this.manualCompactionRunning = true;
+        this.manualCompactionAbortRequested = false;
         try {
           return await this.withFinalRunningNotification(() =>
             this.inner.compact(command.customInstructions as string | undefined)
           );
         } finally {
+          this.manualCompactionRunning = false;
+          this.manualCompactionAbortRequested = false;
           invalidateSessionListCache();
         }
       }
@@ -493,17 +516,6 @@ export class AgentSessionWrapper {
         this.inner.setSessionName(name);
         invalidateSessionListCache();
         return null;
-      }
-
-      case "get_session_stats": {
-        return {
-          ...this.inner.getSessionStats(),
-          sessionName: this.inner.sessionManager.getSessionName(),
-        };
-      }
-
-      case "get_last_assistant_text": {
-        return { text: this.inner.getLastAssistantText() ?? "" };
       }
 
       case "set_auto_compaction": {
