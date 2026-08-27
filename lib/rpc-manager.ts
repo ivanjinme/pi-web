@@ -130,6 +130,7 @@ export class AgentSessionWrapper {
   private onDestroyCallback: (() => void) | null = null;
   private shutdownPromise: Promise<void> | null = null;
   private sessionShutdownEmitted = false;
+  private forceShutdownOnIdle = false;
   private _alive = true;
 
   constructor(public readonly inner: AgentSessionLike) {}
@@ -164,9 +165,11 @@ export class AgentSessionWrapper {
 
   start(): void {
     this.unsubscribe = this.inner.subscribe((event: AgentEvent) => {
-      this.resetIdleTimer();
       if (event.type === "agent_end") {
         invalidateSessionListCache();
+        this.resetIdleTimer();
+      } else if (event.type === "compaction_end") {
+        this.resetIdleTimer();
       }
       // compact() aborts any active agent turn before it creates its own
       // AbortController. A Stop request can arrive during that gap, so retain
@@ -287,8 +290,10 @@ export class AgentSessionWrapper {
 
   private resetIdleTimer(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
+    if (!this._alive) return;
+    if (!this.isRunning()) this.forceShutdownOnIdle = false;
     this.idleTimer = setTimeout(() => {
-      if (this.isRunning()) {
+      if (this.isRunning() && !this.forceShutdownOnIdle) {
         this.resetIdleTimer();
         return;
       }
@@ -336,8 +341,8 @@ export class AgentSessionWrapper {
   }
 
   async send(command: Record<string, unknown>): Promise<unknown> {
-    this.resetIdleTimer();
     const type = command.type as string;
+    if (type !== "get_state") this.resetIdleTimer();
     if (this.shouldWaitForExtensions(type)) await this.waitForExtensionsBound();
 
     if (type === "prompt" || type === "steer" || type === "follow_up") {
@@ -366,10 +371,12 @@ export class AgentSessionWrapper {
           source: "rpc",
         }).then(() => {
           this.promptRunning = false;
+          this.resetIdleTimer();
           if (!streamingBehavior) this.emit({ type: "prompt_done" });
           notifyRunningChange();
         }).catch((error) => {
           this.promptRunning = false;
+          this.resetIdleTimer();
           invalidateSessionListCache();
           this.emit({
             type: "prompt_error",
@@ -382,16 +389,21 @@ export class AgentSessionWrapper {
       }
 
       case "abort":
-        if (this.manualCompactionRunning || this.inner.isCompacting) {
-          this.manualCompactionAbortRequested = true;
-          this.inner.abortCompaction();
-          // Before compact() creates its AbortController it may still be
-          // waiting for the previous agent turn to abort.
-          if (!this.inner.isCompacting) await this.inner.abort();
+        this.forceShutdownOnIdle = true;
+        try {
+          if (this.manualCompactionRunning || this.inner.isCompacting) {
+            this.manualCompactionAbortRequested = true;
+            this.inner.abortCompaction();
+            // Before compact() creates its AbortController it may still be
+            // waiting for the previous agent turn to abort.
+            if (!this.inner.isCompacting) await this.inner.abort();
+            return null;
+          }
+          await this.withFinalRunningNotification(() => this.inner.abort());
           return null;
+        } finally {
+          if (!this.isRunning()) this.forceShutdownOnIdle = false;
         }
-        await this.withFinalRunningNotification(() => this.inner.abort());
-        return null;
 
       case "get_state": {
         const model = this.inner.model;
@@ -650,12 +662,14 @@ export class AgentSessionWrapper {
           this.persistPendingSession();
           return result;
         } finally {
+          this.resetIdleTimer();
           invalidateSessionListCache();
           notifyRunningChange();
         }
       }
 
       case "abort_bash": {
+        this.forceShutdownOnIdle = true;
         this.inner.abortBash();
         return null;
       }
