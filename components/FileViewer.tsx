@@ -43,6 +43,8 @@ interface FileData {
 
 type DisplayMode = "source" | "preview" | "diff";
 
+const SOURCE_HIGHLIGHT_MAX_LINES = 1_000;
+
 const DISPLAY_MODE_LABELS: Record<DisplayMode, string> = {
   source: "Source",
   preview: "Preview",
@@ -1015,6 +1017,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
   const hasPreview = isHtml || isMarkdown;
   const markdownDirectory = getFileDirectory(filePath);
   const lines = content.split("\n");
+  const useLightweightSource = lines.length > SOURCE_HIGHLIGHT_MAX_LINES;
   const effectiveDisplayMode = isDeletedDiff ? "diff" : displayMode;
   const displayModes: DisplayMode[] = isDeletedDiff
     ? ["diff"]
@@ -1201,6 +1204,41 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
             >
               {markdownPreview}
             </ReactMarkdown>
+          </div>
+        ) : useLightweightSource ? (
+          <div
+            className="file-source-view is-lightweight"
+            style={{
+              width: wrapLines ? "100%" : "max-content",
+              minWidth: "100%",
+              minHeight: "100%",
+              background: "var(--bg)",
+              ...FILE_CODE_STYLE,
+            }}
+          >
+            {lines.map((line, lineIndex) => (
+              <span
+                className="file-source-line"
+                data-line-number={lineIndex + 1}
+                key={`source-line-${lineIndex}`}
+                style={{ display: "flex", minWidth: "100%" }}
+              >
+                <span aria-hidden="true" style={FILE_LINE_NUMBER_STYLE}>
+                  {lineIndex + 1}
+                </span>
+                <span
+                  className="file-source-line-content"
+                  style={{
+                    flex: "1 1 auto",
+                    minWidth: 0,
+                    overflowWrap: wrapLines ? "anywhere" : "normal",
+                    whiteSpace: wrapLines ? "pre-wrap" : "pre",
+                  }}
+                >
+                  {line}
+                </span>
+              </span>
+            ))}
           </div>
         ) : (
           <SyntaxHighlighter
