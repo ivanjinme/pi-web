@@ -8,22 +8,22 @@ const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   tsconfigPaths: true,
 });
-const { MermaidBlock } = await jiti.import("./MermaidBlock.tsx");
-const { I18nProvider } = await jiti.import("../hooks/useI18n.tsx");
+const { MermaidBlock, CodeBlock } = await jiti.import("./MermaidBlock.tsx");
+const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 
 // Simple sequenceDiagram for testing
 const mermaidSrc = `sequenceDiagram
     Alice->>Bob: Hello
     Bob-->>Alice: Hi`;
 
-function renderMermaid(props) {
+function renderComponent(Component, props) {
   return renderToStaticMarkup(
-    React.createElement(
-      I18nProvider,
-      null,
-      React.createElement(MermaidBlock, props),
-    ),
+    React.createElement(I18nProvider, null, React.createElement(Component, props)),
   );
+}
+
+function renderMermaid(props) {
+  return renderComponent(MermaidBlock, props);
 }
 
 test("MermaidBlock renders source by default", () => {
@@ -49,6 +49,19 @@ test("MermaidBlock with isStreaming falls back to source view", () => {
   assert.match(html, />Preview</);
   assert.match(html, /Alice/);
   assert.match(html, /-&gt;&gt;/);
+});
+
+test("CodeBlock skips syntax highlighting while streaming", () => {
+  const html = renderComponent(CodeBlock, { code: "const answer = 42;", lang: "typescript", isStreaming: true });
+
+  assert.match(html, /<pre/);
+  assert.doesNotMatch(html, /react-syntax-highlighter/);
+});
+
+test("CodeBlock highlights completed code", () => {
+  const html = renderComponent(CodeBlock, { code: "const answer = 42;", lang: "typescript" });
+
+  assert.match(html, /react-syntax-highlighter/);
 });
 
 test("MermaidBlock renders empty graph without error", () => {

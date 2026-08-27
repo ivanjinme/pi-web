@@ -82,7 +82,7 @@ export function MermaidBlock({ code, isStreaming, defaultPreview = false }: Merm
   );
 
   if (!previewVisible) {
-    return <CodeBlock code={code} lang="mermaid" headerAction={previewButton} />;
+    return <CodeBlock code={code} lang="mermaid" headerAction={previewButton} isStreaming={isStreaming} />;
   }
 
   const body = renderState?.key === currentKey && renderState.status === "error" ? (
@@ -224,13 +224,14 @@ interface CodeBlockProps {
   code: string;
   lang: string;
   headerAction?: ReactNode;
+  isStreaming?: boolean;
 }
 
 /**
  * Syntax-highlighted code block with copy button.
  * Used as the "source" view for mermaid blocks and for all non-mermaid code fences.
  */
-export function CodeBlock({ code, lang, headerAction }: CodeBlockProps) {
+export function CodeBlock({ code, lang, headerAction, isStreaming }: CodeBlockProps) {
   const { isDark } = useTheme();
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
@@ -256,23 +257,36 @@ export function CodeBlock({ code, lang, headerAction }: CodeBlockProps) {
           </button>
         </div>
       </div>
-      <SyntaxHighlighter
-        language={lang || "text"}
-        style={isDark ? vscDarkPlus : vs}
-        showLineNumbers
-        lineNumberStyle={{ color: "var(--text-dim)", fontStyle: "normal" }}
-        customStyle={{
+      {isStreaming ? (
+        <pre style={{
           margin: 0,
           padding: "11px 13px",
           fontSize: 12.5,
           lineHeight: 1.62,
-          borderRadius: 0,
+          overflowX: "auto",
           background: "color-mix(in srgb, var(--bg) 92%, var(--bg-panel))",
-        }}
-        codeTagProps={{ style: { fontFamily: "var(--font-mono)" } }}
-      >
-        {code}
-      </SyntaxHighlighter>
+        }}>
+          <code style={{ fontFamily: "var(--font-mono)" }}>{code}</code>
+        </pre>
+      ) : (
+        <SyntaxHighlighter
+          language={lang || "text"}
+          style={isDark ? vscDarkPlus : vs}
+          showLineNumbers
+          lineNumberStyle={{ color: "var(--text-dim)", fontStyle: "normal" }}
+          customStyle={{
+            margin: 0,
+            padding: "11px 13px",
+            fontSize: 12.5,
+            lineHeight: 1.62,
+            borderRadius: 0,
+            background: "color-mix(in srgb, var(--bg) 92%, var(--bg-panel))",
+          }}
+          codeTagProps={{ style: { fontFamily: "var(--font-mono)" } }}
+        >
+          {code}
+        </SyntaxHighlighter>
+      )}
     </div>
   );
 }
