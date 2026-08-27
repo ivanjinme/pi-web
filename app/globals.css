@@ -2129,6 +2129,26 @@ span.linenumber {
   font-size: 13px;
 }
 
+.settings-page-header .settings-version {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.settings-version b {
+  margin-right: 4px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.settings-version b + b {
+  margin-left: 12px;
+}
+
 .settings-segmented {
   display: flex;
   overflow: hidden;

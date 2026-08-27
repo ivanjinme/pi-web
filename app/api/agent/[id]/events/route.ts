@@ -1,3 +1,7 @@
+import {
+  isEventIncludedInSnapshot,
+  toClientAgentEvent,
+} from "@/lib/agent-event-wire";
 import { resolveSessionPath } from "@/lib/session-reader";
 import { getRpcSession, startRpcSession } from "@/lib/rpc-manager";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -28,22 +32,49 @@ export async function GET(
 
   const stream = new ReadableStream({
     start(controller) {
+      const encoder = new TextEncoder();
       const encode = (data: unknown) => {
         const text = `data: ${JSON.stringify(data)}\n\n`;
-        controller.enqueue(new TextEncoder().encode(text));
+        controller.enqueue(encoder.encode(text));
       };
 
-      // Send initial connected event
-      encode({ type: "connected", sessionId: id });
+      const snapshotState: { message?: unknown; published: boolean } = {
+        published: false,
+      };
+      const bufferedEvents: Parameters<typeof toClientAgentEvent>[0][] = [];
+      const forwardEvent = (event: Parameters<typeof toClientAgentEvent>[0]) => {
+        if (isEventIncludedInSnapshot(event, snapshotState.message)) return;
+        const clientEvent = toClientAgentEvent(event);
+        if (clientEvent) encode(clientEvent);
+      };
 
+      // Subscribe before reading the snapshot so no delta can fall into the
+      // reconnect gap. Events emitted synchronously while publishing are held
+      // until the authoritative snapshot is on the wire.
       const unsubscribe = session.onEvent((event) => {
-        encode(event);
+        if (!snapshotState.published) {
+          bufferedEvents.push(event);
+          return;
+        }
+        forwardEvent(event);
       });
+
+      snapshotState.message = session.streamingMessage;
+      encode({
+        type: "connected",
+        sessionId: id,
+        isStreaming: session.isStreaming,
+      });
+      if (snapshotState.message) {
+        encode({ type: "message_start", message: snapshotState.message });
+      }
+      snapshotState.published = true;
+      for (const event of bufferedEvents) forwardEvent(event);
 
       // Heartbeat every 30s to prevent server/proxy timeout (Next.js default ~120-150s)
       const heartbeat = setInterval(() => {
         try {
-          controller.enqueue(new TextEncoder().encode(":\n\n"));
+          controller.enqueue(encoder.encode(":\n\n"));
         } catch {
           // controller already closed
         }

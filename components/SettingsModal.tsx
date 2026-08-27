@@ -91,6 +91,11 @@ export function SettingsModal({
                 )}
                 {contextual && cwd && !projectTrusted && <p>{t(page === "skills" ? "trust.skillsNotLoaded" : "trust.pluginsNotLoaded")}</p>}
               </div>
+              {page === "general" && (
+                <div className="settings-version" aria-label={t("settings.version")}>
+                  <b>{t("settings.webVersion")}</b>{process.env.NEXT_PUBLIC_APP_VERSION ?? "unknown"} <b>{t("settings.piVersion")}</b>{process.env.NEXT_PUBLIC_PI_VERSION ?? "unknown"}
+                </div>
+              )}
               {contextual && cwd && !projectTrusted && (
                 <button type="button" className="settings-trust" onClick={onTrustProject}>{t("trust.trustProject")}</button>
               )}

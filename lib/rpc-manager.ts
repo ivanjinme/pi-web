@@ -68,8 +68,10 @@ const PROGRESS_UPDATE_INSTRUCTION = "You must always start with an intermediary 
 class PlainTextTheme extends Theme {
   constructor() {
     super(
-      { thinkingXhigh: "" } as ConstructorParameters<typeof Theme>[0],
-      {} as ConstructorParameters<typeof Theme>[1],
+      // Pi 0.84 derives optional search/scrollbar colors from these keys
+      // before our no-op overrides are used.
+      { thinkingXhigh: "", text: "" } as ConstructorParameters<typeof Theme>[0],
+      { selectedBg: "" } as ConstructorParameters<typeof Theme>[1],
       "truecolor",
     );
   }
@@ -140,6 +142,14 @@ export class AgentSessionWrapper {
 
   get cwd(): string {
     return this.inner.sessionManager.getCwd();
+  }
+
+  get streamingMessage() {
+    return this.inner.agent.state?.streamingMessage;
+  }
+
+  get isStreaming(): boolean {
+    return this.inner.isStreaming;
   }
 
   isAlive(): boolean {

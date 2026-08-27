@@ -5,6 +5,7 @@ import type {
   SlashCommandInfo,
   Theme,
 } from "@earendil-works/pi-coding-agent";
+import type { AgentMessage as PiAgentMessage } from "@earendil-works/pi-agent-core";
 
 export interface ContextUsage {
   percent: number | null;
@@ -127,7 +128,13 @@ export interface AgentSessionLike {
   };
   readonly sessionManager: SessionManager;
   readonly settingsManager: SettingsManager;
-  readonly agent: { state?: { systemPrompt?: string; thinkingLevel?: string } };
+  readonly agent: {
+    state?: {
+      systemPrompt?: string;
+      thinkingLevel?: string;
+      streamingMessage?: PiAgentMessage;
+    };
+  };
   readonly extensionRunner: ExtensionRunnerLike;
   readonly promptTemplates: readonly PromptTemplateLike[];
   readonly resourceLoader: ResourceLoaderLike;
