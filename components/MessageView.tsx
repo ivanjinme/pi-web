@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, useRef, useEffect, useMemo } from "react";
+import { memo, useState, useRef, useEffect, useMemo, type ComponentProps } from "react";
 import { MarkdownBody } from "./MarkdownBody";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
@@ -22,7 +22,35 @@ import type {
 } from "@/lib/types";
 
 const MAX_THINKING_CACHE_ENTRIES = 100;
+const MAX_MARKDOWN_CHARS = 100_000;
 const thinkingContentCache = new Map<string, Promise<string>>();
+
+function SafeMarkdownBody({ children, className, ...props }: ComponentProps<typeof MarkdownBody>) {
+  const { t } = useI18n();
+  const [showRaw, setShowRaw] = useState(false);
+
+  if (children.length <= MAX_MARKDOWN_CHARS) {
+    return <MarkdownBody className={className} {...props}>{children}</MarkdownBody>;
+  }
+  if (!showRaw) {
+    return (
+      <button type="button" onClick={() => setShowRaw(true)} style={{
+        display: "block", width: "100%", margin: "4px 0", padding: "7px 10px",
+        border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)",
+        color: "var(--text-muted)", cursor: "pointer", fontSize: 12, textAlign: "left",
+      }}>
+        {t("i18n.largeMessageReveal")}
+      </button>
+    );
+  }
+  return (
+    <div className={className} style={{ maxHeight: 420, overflow: "auto", fontSize: 12, lineHeight: 1.5 }}>
+      <pre style={{ margin: 0, padding: "8px 10px", whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
+        {children}
+      </pre>
+    </div>
+  );
+}
 
 function loadThinkingContent(sessionId: string, entryId: string, blockIndex: number): Promise<string> {
   const key = `${sessionId}:${entryId}:${blockIndex}`;
@@ -299,7 +327,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onEditFromHere }: 
               </div>
             </>
           ) : content ? (
-            <MarkdownBody className="markdown-user-message" cwd={cwd} onOpenFile={onOpenFile}>{content}</MarkdownBody>
+            <SafeMarkdownBody className="markdown-user-message" cwd={cwd} onOpenFile={onOpenFile}>{content}</SafeMarkdownBody>
           ) : null}
         </div>
 
@@ -699,9 +727,9 @@ function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCal
 function TextBlock({ block, isStreaming, cwd, onOpenFile }: { block: TextContent; isStreaming?: boolean; cwd?: string; onOpenFile?: (filePath: string) => void }) {
   const className = getTextPhase(block) === "commentary" ? "markdown-commentary" : undefined;
   return (
-    <MarkdownBody className={className} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>
+    <SafeMarkdownBody className={className} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>
       {block.text}
-    </MarkdownBody>
+    </SafeMarkdownBody>
   );
 }
 

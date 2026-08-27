@@ -395,6 +395,7 @@ export const enLocale: LocalePlugin = {
     "i18n.packageEnabled": "Package enabled.",
     "i18n.sessionReloaded": "Session reloaded.",
     "i18n.thinking": "Thinking",
+    "i18n.largeMessageReveal": "Message exceeds 100,000 characters. Click to view as plain text.",
     "i18n.loadingThinking": "Loading thinking...",
     "i18n.editFromHere": "Edit from here",
     "i18n.newSession": "New from here",
