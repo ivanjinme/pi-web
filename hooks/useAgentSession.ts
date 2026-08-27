@@ -156,7 +156,8 @@ function delay(ms: number): Promise<void> {
 
 function isCompactionCancellation(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /compaction cancelled|\baborterror\b/i.test(message) || (error instanceof Error && error.name === "AbortError");
+  return /compaction cancelled|\baborterror\b|\b(?:this |the )?operation was aborted\b/i.test(message)
+    || (error instanceof Error && error.name === "AbortError");
 }
 
 function extractMessageText(message: Partial<AgentMessage>): string {
