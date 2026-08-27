@@ -72,6 +72,7 @@ interface ExtensionRunnerLike {
     sourceInfo: SlashCommandInfo["sourceInfo"];
   }>;
   setUIContext?(uiContext?: unknown, mode?: "tui" | "rpc" | "json" | "print"): void;
+  emit?(event: { type: string; reason?: string }): Promise<unknown>;
 }
 
 type DialogOptionsLike = {
@@ -140,6 +141,7 @@ export interface AgentSessionLike {
   readonly resourceLoader: ResourceLoaderLike;
 
   readonly bindExtensions?: unknown;
+  dispose(): void;
   reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void>;
   subscribe(listener: (event: AgentSessionEvent) => void): () => void;
   prompt(text: string, options?: {

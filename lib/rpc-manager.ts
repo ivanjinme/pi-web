@@ -128,6 +128,8 @@ export class AgentSessionWrapper {
   private unsubscribe: (() => void) | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private onDestroyCallback: (() => void) | null = null;
+  private shutdownPromise: Promise<void> | null = null;
+  private sessionShutdownEmitted = false;
   private _alive = true;
 
   constructor(public readonly inner: AgentSessionLike) {}
@@ -290,7 +292,9 @@ export class AgentSessionWrapper {
         this.resetIdleTimer();
         return;
       }
-      this.destroy();
+      void this.shutdown().catch((error) => {
+        console.error("[pi-web] failed to shut down idle session:", error instanceof Error ? error.message : error);
+      });
     }, 10 * 60 * 1000);
   }
 
@@ -467,7 +471,7 @@ export class AgentSessionWrapper {
         const newSessionId = SessionManager.open(newSessionFile, sessionDir).getSessionId();
         cacheSessionPath(newSessionId, newSessionFile);
         invalidateSessionListCache();
-        this.destroy();
+        await this.shutdown();
         return { cancelled: false, newSessionId };
       }
 
@@ -671,8 +675,54 @@ export class AgentSessionWrapper {
     for (const id of Array.from(this.activeCustomUis.keys())) this.closeCustomUi(id, undefined);
     this.pendingUiResponses.clear();
     this.pendingUiRequests.clear();
-    this.onDestroyCallback?.();
-    notifyRunningChange();
+
+    const finishDispose = () => {
+      try {
+        this.inner.dispose();
+      } finally {
+        try {
+          this.onDestroyCallback?.();
+        } finally {
+          notifyRunningChange();
+        }
+      }
+    };
+
+    // Direct destruction is used by process shutdown too. Start the extension
+    // hook before invalidating the SDK session; shutdown() awaits it when the
+    // caller can wait, while this path remains best-effort.
+    if (this.sessionShutdownEmitted || typeof this.inner.extensionRunner.emit !== "function") {
+      finishDispose();
+      return;
+    }
+    this.sessionShutdownEmitted = true;
+    void this.inner.extensionRunner.emit({ type: "session_shutdown", reason: "quit" })
+      .catch((error) => {
+        console.error("[pi-web] session_shutdown before dispose failed:", error instanceof Error ? error.message : error);
+      })
+      .finally(finishDispose);
+  }
+
+  async shutdown(): Promise<void> {
+    if (this.shutdownPromise) return this.shutdownPromise;
+    if (!this._alive) return;
+
+    this.shutdownPromise = (async () => {
+      try {
+        try {
+          await this.waitForExtensionsBound();
+        } catch (error) {
+          console.error("[pi-web] extension binding failed before session shutdown:", error instanceof Error ? error.message : error);
+        }
+        if (!this.sessionShutdownEmitted) {
+          this.sessionShutdownEmitted = true;
+          await this.inner.extensionRunner.emit?.({ type: "session_shutdown", reason: "quit" });
+        }
+      } finally {
+        this.destroy();
+      }
+    })();
+    return this.shutdownPromise;
   }
 
   private resolveExtensionUiResponse(response: ExtensionUiResponse): void {
@@ -1028,10 +1078,16 @@ declare global {
 function getRegistry(): Map<string, AgentSessionWrapper> {
   if (!globalThis.__piSessions) {
     globalThis.__piSessions = new Map();
-    const cleanup = () => globalThis.__piSessions?.forEach((s) => s.destroy());
-    process.once("exit", cleanup);
-    process.once("SIGINT", cleanup);
-    process.once("SIGTERM", cleanup);
+    const destroy = () => globalThis.__piSessions?.forEach((session) => session.destroy());
+    const shutdown = () => {
+      const sessions = Array.from(globalThis.__piSessions?.values() ?? []);
+      void Promise.allSettled(sessions.map((session) => session.shutdown()));
+    };
+    // Node cannot await exit handlers; direct destruction starts cleanup as a
+    // final best effort. Signal handlers can await extension shutdown hooks.
+    process.once("exit", destroy);
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
   }
   return globalThis.__piSessions;
 }
@@ -1078,12 +1134,12 @@ export function hasBusyRpcSessionForCwd(cwd: string): boolean {
   );
 }
 
-export function destroyRpcSessionsForCwd(cwd: string): number {
+export async function destroyRpcSessionsForCwd(cwd: string): Promise<number> {
   const targetCwd = normalizeRpcCwd(cwd);
   const sessions = Array.from(getRegistry().values()).filter(
     (session) => normalizeRpcCwd(session.cwd) === targetCwd,
   );
-  for (const session of sessions) session.destroy();
+  await Promise.all(sessions.map((session) => session.shutdown()));
   return sessions.length;
 }
 
