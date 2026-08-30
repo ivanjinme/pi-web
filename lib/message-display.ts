@@ -53,3 +53,17 @@ export function splitFinalAssistantBlocks(
 export function countToolCallBlocks(blocks: AssistantContentBlock[]): number {
   return blocks.filter((block): block is ToolCallContent => block.type === "toolCall").length;
 }
+
+/**
+ * Error text for a failed model call, or null for successful/aborted messages.
+ *
+ * Every provider funnels stream failures (usage limits, overloads, auth) into
+ * an assistant message with stopReason "error" + errorMessage; content may be
+ * empty (e.g. codex usage-limit errors persist `content: []`). The fallback
+ * keeps the error box visible when a provider omits the message text.
+ */
+export function getAssistantErrorMessage(message: AssistantMessage): string | null {
+  if (message.stopReason !== "error") return null;
+  const raw = typeof message.errorMessage === "string" ? message.errorMessage.trim() : "";
+  return raw.length > 0 ? raw : "Model request failed.";
+}

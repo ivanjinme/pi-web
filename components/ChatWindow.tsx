@@ -4,7 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type React
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, CustomMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage } from "@/lib/types";
 import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
-import { countToolCallBlocks, getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "@/lib/message-display";
+import { countToolCallBlocks, getAssistantErrorMessage, getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { MessageView } from "./MessageView";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
@@ -110,6 +110,9 @@ function countToolCalls(messages: AgentMessage[], indices: number[]): number {
 
 function hasDisplayableProcessMessage(message: AgentMessage): boolean {
   if (message.role === "assistant") {
+    // Failed model calls persist as empty assistant messages carrying only
+    // stopReason "error" + errorMessage — keep them so retries show what failed.
+    if (getAssistantErrorMessage(message as AssistantMessage)) return true;
     return getDisplayableAssistantBlocks(message as AssistantMessage).length > 0;
   }
   return message.role === "custom";
@@ -678,7 +681,14 @@ export function ChatWindow({ session, newSessionCwd, newTaskDraftId, showProject
                   : null;
                 const finalAnswerMessage = finalSplit.answerBlocks.length > 0
                   ? withAssistantBlocks(finalAssistant, finalSplit.answerBlocks)
-                  : null;
+                  // A failed model call (e.g. provider usage limit) persists an
+                  // empty assistant message with stopReason "error" + errorMessage.
+                  // With no blocks it would otherwise render nothing here and the
+                  // error would silently vanish from the turn — render it as-is so
+                  // MessageView shows its error box.
+                  : getAssistantErrorMessage(finalAssistant)
+                    ? withAssistantBlocks(finalAssistant, [])
+                    : null;
 
                 const processCount = visibleProcessIndices.length + (finalProcessMessage ? 1 : 0);
                 if (processCount > 0) {

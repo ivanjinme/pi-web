@@ -5,7 +5,7 @@ import { MarkdownBody } from "./MarkdownBody";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
-import { getTextPhase, isEmptyThinkingBlock } from "@/lib/message-display";
+import { getTextPhase, getAssistantErrorMessage, isEmptyThinkingBlock } from "@/lib/message-display";
 import { parseUnifiedPatch, type SplitDiffCell } from "@/lib/patch";
 import type {
   AgentMessage,
@@ -548,11 +548,7 @@ function AssistantMessageView({
     return () => clearInterval(id);
   }, [isStreaming]);
 
-  const errorMessage = message.stopReason === "error"
-    ? (typeof message.errorMessage === "string" && message.errorMessage.trim()
-      ? message.errorMessage.trim()
-      : "Model request failed.")
-    : null;
+  const errorMessage = getAssistantErrorMessage(message);
 
   if (blocks.length === 0 && !isStreaming && !errorMessage) return null;
 
