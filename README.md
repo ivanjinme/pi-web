@@ -1,6 +1,6 @@
 # Pi Web
 
-[中文文档](./README.zh-CN.md) | [日本語](./README.ja.md)
+[中文文档](./README.zh-CN.md)
 
 Local web UI for the [pi coding agent](https://github.com/badlogic/pi-mono). Pi Web reads your local pi session files and gives you a browser workspace for session browsing, real-time chat, model configuration, skill management, and project file preview.
 
@@ -15,13 +15,13 @@ Pi Web requires Node.js 22.19.0 or newer. Check your version with `node --versio
 **Run without installing:**
 
 ```bash
-npx @agegr/pi-web@latest
+npx @weclio/pi-web@latest
 ```
 
 **Or install globally:**
 
 ```bash
-npm install -g @agegr/pi-web
+npm install -g @weclio/pi-web
 pi-web
 ```
 
@@ -54,7 +54,7 @@ On macOS or Linux:
 HTTP_PROXY=http://127.0.0.1:7890 \
 HTTPS_PROXY=http://127.0.0.1:7890 \
 NO_PROXY=localhost,127.0.0.1 \
-npx @agegr/pi-web@latest
+npx @weclio/pi-web@latest
 ```
 
 On Windows PowerShell:
@@ -63,7 +63,7 @@ On Windows PowerShell:
 $env:HTTP_PROXY = "http://127.0.0.1:7890"
 $env:HTTPS_PROXY = "http://127.0.0.1:7890"
 $env:NO_PROXY = "localhost,127.0.0.1"
-npx @agegr/pi-web@latest
+npx @weclio/pi-web@latest
 ```
 
 ## Features
@@ -82,6 +82,7 @@ npx @agegr/pi-web@latest
 - **Session files**: files are stored as `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`.
 - **Model config**: the Models panel reads and writes `models.json` in the pi agent directory. Model lists and defaults come from pi's config.
 - **File access**: file browsing and preview are scoped to the selected project directory and working directories that appear in sessions.
+- **Default workspace**: a new task sent without a selected project lazily uses `~/.weclio/default-workspace`. Set `PI_WEB_DEFAULT_CWD` to choose another path.
 - **Git worktrees**: see [Worktrees in Pi Web](./docs/worktrees.md) for when the switcher appears, how new worktrees are created, and what removal does.
 - **Forks vs in-session branches**: Fork creates a new `.jsonl` file. "Edit from here" creates another branch inside the same session file.
 - **Internationalization**: see [Internationalization](./docs/i18n.md) for using translations and adding languages or UI text.
@@ -112,8 +113,8 @@ app/
     agent/          # creates/drives AgentSession and exposes SSE events
     auth/           # OAuth and API key management
     cwd/browse/     # browsable server directory listing
+    cwd/default/    # lazily created fallback workspace
     cwd/validate/   # custom working directory validation
-    default-cwd/    # pi default working directory lookup
     files/          # file listing, reading, preview, and watching
     home/           # current user home directory
     models/         # available models, default model, thinking levels

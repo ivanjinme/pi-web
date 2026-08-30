@@ -3,6 +3,7 @@
 import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, forwardRef, KeyboardEvent } from "react";
 import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
 import { clearDraft, getDraft, setDraft, type ChatDraftImage } from "@/lib/draft-store";
+import { NewTaskProjectPicker } from "./NewTaskProjectPicker";
 import {
   MAX_ATTACHED_IMAGE_BYTES,
   MAX_ATTACHED_IMAGES,
@@ -29,7 +30,7 @@ interface ModelOption {
 }
 
 interface Props {
-  onSend: (message: string, images?: AttachedImage[]) => void;
+  onSend: (message: string, images?: AttachedImage[]) => boolean | void | Promise<boolean | void>;
   onAbort: () => void;
   onSteer?: (message: string, images?: AttachedImage[]) => void | Promise<void>;
   onFollowUp?: (message: string, images?: AttachedImage[]) => void | Promise<void>;
@@ -63,6 +64,13 @@ interface Props {
   draftKey?: string;
   /** Session working directory — enables the @ file autocomplete menu */
   cwd?: string | null;
+  autoFocus?: boolean;
+  projectPicker?: {
+    resetKey: string;
+    selectedCwd: string | null;
+    onSelect: (cwd: string) => void;
+    onClear: () => void;
+  };
 }
 
 export interface ChatInputHandle {
@@ -237,6 +245,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onPromptWithStreamingBehavior,
   draftKey,
   cwd,
+  autoFocus = false,
+  projectPicker,
 }: Props, ref) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
@@ -261,6 +271,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [historyActiveIndex, setHistoryActiveIndex] = useState(0);
   const [queueAction, setQueueAction] = useState<"edit" | "delete" | null>(null);
   const [queueSubmitting, setQueueSubmitting] = useState(false);
+  const [sendSubmitting, setSendSubmitting] = useState(false);
   const [fileIndex, setFileIndex] = useState<{ cwd: string; entries: FileIndexEntry[]; truncated: boolean } | null>(null);
   const [fileIndexLoading, setFileIndexLoading] = useState(false);
   const [atServerResult, setAtServerResult] = useState<{ cwd: string; query: string; matches: FileIndexEntry[] } | null>(null);
@@ -414,6 +425,19 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     }
   }, [clearImages, draftKey]);
 
+  const focusComposer = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  }, []);
+
+  useEffect(() => {
+    if (!autoFocus) return;
+    const frame = requestAnimationFrame(focusComposer);
+    return () => cancelAnimationFrame(frame);
+  }, [autoFocus, focusComposer]);
+
   useEffect(() => {
     if (!draftKey || draftKeyRef.current !== draftKey) return;
     setDraft(draftKey, {
@@ -461,18 +485,23 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const handleSend = useCallback(async () => {
     const msg = value.trim();
     if (!msg && !attachedImages.length) return;
-    if (isStreaming) return;
+    if (isStreaming || sendSubmitting) return;
     onAudioUnlock?.();
-    if (!attachedImages.length && msg.startsWith("/") && onBuiltinCommand) {
-      clearInput();
-      const result = await onBuiltinCommand(msg);
-      if (result.handled) return;
-      onSend(msg);
-      return;
+    setSendSubmitting(true);
+    try {
+      if (!attachedImages.length && msg.startsWith("/") && onBuiltinCommand) {
+        const result = await onBuiltinCommand(msg);
+        if (result.handled) {
+          clearInput();
+          return;
+        }
+      }
+      const accepted = await onSend(msg, attachedImages.length ? attachedImages : undefined);
+      if (accepted !== false) clearInput();
+    } finally {
+      setSendSubmitting(false);
     }
-    onSend(msg, attachedImages.length ? attachedImages : undefined);
-    clearInput();
-  }, [value, attachedImages, isStreaming, onBuiltinCommand, onSend, clearInput, onAudioUnlock]);
+  }, [value, attachedImages, isStreaming, sendSubmitting, onBuiltinCommand, onSend, clearInput, onAudioUnlock]);
 
   const slashQuery = value.startsWith("/") && !/\s/.test(value.slice(1))
     ? value.slice(1).toLowerCase()
@@ -509,6 +538,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const hasQueuedMessage = queuedEntries.length > 0;
   const canQueueStreamingMessage = hasInputText && attachedImages.length === 0 && !hasQueuedMessage && !queueSubmitting;
   const willSendSteer = isStreaming && !isCompacting && Boolean(onSteer) && canQueueStreamingMessage;
+  // Disabled === cursor-not-allowed for the send/stop button; keep them in one place.
+  const sendBlocked = sendSubmitting || (!isStreaming && !value.trim() && !attachedImages.length);
   const queueIconButtonStyle: React.CSSProperties = {
     display: "grid", placeItems: "center", width: 25, height: 25, padding: 0,
     border: "none", borderRadius: 6, background: "transparent",
@@ -1119,6 +1150,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         )}
 
         {/* Main input */}
+        {projectPicker && (
+          <NewTaskProjectPicker
+            resetKey={projectPicker.resetKey}
+            selectedCwd={projectPicker.selectedCwd}
+            onSelect={projectPicker.onSelect}
+            onClear={projectPicker.onClear}
+            onFocusComposer={focusComposer}
+          />
+        )}
         <div style={{ position: "relative", isolation: "isolate" }}>
           {/* Absolute overlay: queue changes never alter composer/page height. */}
           {queuedEntries.length > 0 && (
@@ -1138,6 +1178,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 return (
                   <div
                     key={`${entry.kind}-${index}-${entry.text}`}
+                    className="composer-floating-surface"
                     aria-busy={busy}
                     style={{
                       display: "flex",
@@ -1146,10 +1187,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       gap: 10,
                       minHeight: 46,
                       padding: "9px 11px 15px 12px",
-                      border: "1px solid var(--border)",
                       borderRadius: "16px 16px 8px 8px",
-                      background: "var(--bg-panel)",
-                      boxShadow: "0 -5px 18px -14px rgba(15,23,42,0.38)",
                       color: "var(--text)",
                     }}
                   >
@@ -1535,7 +1573,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           <button
             type="button"
             onClick={willSendSteer ? () => sendQueued("steer") : isStreaming ? onAbort : handleSend}
-            disabled={!isStreaming && !value.trim() && !attachedImages.length}
+            disabled={sendBlocked}
             title={willSendSteer ? `${t("chat.steer")} · Enter` : isCompacting ? t("chat.stopCompaction") : isStreaming ? t("chat.stopAgent") : t("chat.send")}
             aria-label={willSendSteer ? t("chat.steer") : isCompacting ? t("chat.stopCompaction") : isStreaming ? t("chat.stopAgent") : t("chat.send")}
             style={{
@@ -1555,7 +1593,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               border: isStreaming && !willSendSteer ? "1px solid color-mix(in srgb, #ef4444 32%, transparent)" : "1px solid transparent",
               borderRadius: 9,
               color: willSendSteer ? "#fff" : isStreaming ? "#ef4444" : (value.trim() || attachedImages.length) ? "#fff" : "var(--text-dim)",
-              cursor: isStreaming || value.trim() || attachedImages.length ? "pointer" : "not-allowed",
+              cursor: sendBlocked ? "not-allowed" : "pointer",
               boxShadow: (willSendSteer || (!isStreaming && (value.trim() || attachedImages.length)))
                 ? "0 1px 3px color-mix(in srgb, var(--accent) 24%, transparent)"
                 : "none",

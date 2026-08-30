@@ -21,8 +21,8 @@ export function registerAbortHandler(handler: (() => void) | null): void {
 // ---------------------------------------------------------------------------
 
 interface UseGlobalKeyboardShortcutsOptions {
-  /** Called when Ctrl+Alt+N is pressed. Receives current cwd. */
-  onNewSession?: (cwd: string) => void;
+  /** Called when Ctrl+Alt+N is pressed. cwd is null when no project is selected. */
+  onNewSession?: (cwd: string | null) => void;
   /** The currently selected project directory (sidebar cwd). */
   activeCwd?: string | null;
 }
@@ -61,9 +61,9 @@ export function useGlobalKeyboardShortcuts(
 
       // ---- Ctrl+Alt+N: new session ----
       if (e.key === "n" && e.ctrlKey && e.altKey) {
-        if (!activeCwd || !onNewSession) return;
+        if (!onNewSession) return;
         e.preventDefault();
-        onNewSession(activeCwd);
+        onNewSession(activeCwd ?? null);
       }
     };
 

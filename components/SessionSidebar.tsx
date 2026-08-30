@@ -14,6 +14,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { SessionInfo } from "@/lib/types";
+import { loadProjectFolders, saveProjectFolders } from "@/lib/project-folders";
 import { useI18n } from "@/hooks/useI18n";
 import { DirectoryPicker } from "./DirectoryPicker";
 
@@ -28,7 +29,7 @@ declare global {
 interface Props {
   selectedSessionId: string | null;
   onSelectSession: (session: SessionInfo, isRestore?: boolean) => void;
-  onNewSession?: (sessionId: string, cwd: string) => void;
+  onNewSession?: (sessionId: string, cwd: string | null) => void;
   initialSessionId?: string | null;
   skipInitialProjectSelection?: boolean;
   onInitialRestoreDone?: () => void;
@@ -131,7 +132,6 @@ function PathLabel({ text, style }: { text: string; style?: CSSProperties }) {
 }
 
 const DROPDOWN_ANIMATION_MS = 140;
-const PROJECT_FOLDERS_STORAGE_KEY = "pi-web:project-folders";
 const PINNED_PROJECTS_STORAGE_KEY = "pi-web:pinned-projects";
 const PROJECT_LABELS_STORAGE_KEY = "pi-web:project-labels";
 
@@ -588,7 +588,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const sseAuthoritativeRef = useRef(false);
 
   useEffect(() => {
-    setProjectFolders(loadStringArray(PROJECT_FOLDERS_STORAGE_KEY));
+    setProjectFolders(loadProjectFolders());
     setPinnedProjects(new Set(loadStringArray(PINNED_PROJECTS_STORAGE_KEY)));
     setProjectLabels(loadProjectLabels());
   }, []);
@@ -796,7 +796,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       const validatedPath = data.cwd ?? path;
       setProjectFolders((previous) => {
         const next = previous.includes(validatedPath) ? previous : [...previous, validatedPath];
-        saveStringArray(PROJECT_FOLDERS_STORAGE_KEY, next);
+        saveProjectFolders(next);
         return next;
       });
       setSelectedCwd(validatedPath);
@@ -905,8 +905,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     onSelectSession(s);
   }, [onSelectSession]);
 
-  const createNewSession = useCallback((cwd: string) => {
-    setSelectedCwd(cwd);
+  const createNewSession = useCallback((cwd: string | null) => {
+    if (cwd) setSelectedCwd(cwd);
     setHighlightedProjectRoot(projectRootFor(cwd));
     // Generate a temporary UUID client-side — no backend call needed.
     // Pi will be spawned lazily when the user sends the first message.
@@ -917,7 +917,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, [onNewSession, projectRootFor]);
 
   const handleNewSession = useCallback(() => {
-    if (selectedCwd) createNewSession(selectedCwd);
+    createNewSession(selectedCwd);
   }, [createNewSession, selectedCwd]);
 
   const toggleProjectPin = useCallback((root: string) => {
@@ -937,7 +937,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     setProjectFolders((previous) => {
       const withoutOld = previous.filter((path) => path !== previousRoot);
       const next = withoutOld.includes(nextRoot) ? withoutOld : [...withoutOld, nextRoot];
-      saveStringArray(PROJECT_FOLDERS_STORAGE_KEY, next);
+      saveProjectFolders(next);
       return next;
     });
     setProjectLabels((previous) => {
@@ -1046,13 +1046,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           <div style={{ display: "flex", gap: 6 }}>
             <button
               onClick={handleNewSession}
-              disabled={!selectedCwd}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
                 background: "var(--bg-hover)",
                 border: "1px solid var(--border)",
-                color: selectedCwd ? "var(--text-muted)" : "var(--text-dim)",
-                cursor: selectedCwd ? "pointer" : "not-allowed",
+                color: "var(--text-muted)",
+                cursor: "pointer",
                 height: 32,
                 paddingLeft: 10,
                 paddingRight: 12,
@@ -1064,14 +1063,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 transition: "background 0.12s, color 0.12s, border-color 0.12s",
               }}
               onMouseEnter={(e) => {
-                if (!selectedCwd) return;
                 e.currentTarget.style.background = "var(--bg-selected)";
                 e.currentTarget.style.color = "var(--accent)";
                 e.currentTarget.style.borderColor = "color-mix(in srgb, var(--accent) 35%, var(--border))";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = "var(--bg-hover)";
-                e.currentTarget.style.color = selectedCwd ? "var(--text-muted)" : "var(--text-dim)";
+                e.currentTarget.style.color = "var(--text-muted)";
                 e.currentTarget.style.borderColor = "var(--border)";
               }}
             >
@@ -1085,7 +1083,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         </div>
 
         <div className="sidebar-primary-actions">
-          <button type="button" className="sidebar-primary-action" onClick={handleNewSession} disabled={!selectedCwd}>
+          <button type="button" className="sidebar-primary-action" onClick={handleNewSession}>
             <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
             </svg>
@@ -1401,24 +1399,23 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             {error}
           </div>
         )}
-        {!loading && !error && projectGroups.every((group) => group.sessions.length === 0) && (
-          <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
-            {t("sidebar.noSessions")}
-          </div>
-        )}
         {!loading && !error && (
           <div className="projects-heading">
-            <button
-              type="button"
-              onClick={() => setProjectsOpen((open) => !open)}
-              className="projects-heading-label"
-              aria-expanded={projectsOpen}
-            >
-              <span>Projects</span>
-              <svg className={projectsOpen ? "is-open" : ""} width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <polyline points="4 2.5 8 6 4 9.5" />
-              </svg>
-            </button>
+            {projectGroups.length === 0 ? (
+              <span className="projects-heading-empty">Projects</span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setProjectsOpen((open) => !open)}
+                className="projects-heading-label"
+                aria-expanded={projectsOpen}
+              >
+                <span>Projects</span>
+                <svg className={projectsOpen ? "is-open" : ""} width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="4 2.5 8 6 4 9.5" />
+                </svg>
+              </button>
+            )}
             <button type="button" onClick={handleCustomPathClick} className="projects-add" aria-label="New project">+</button>
           </div>
         )}

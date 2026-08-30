@@ -35,6 +35,11 @@ interface RenderMessageOptions {
 interface Props {
   session: SessionInfo | null;
   newSessionCwd: string | null;
+  newTaskDraftId: string | null;
+  showProjectPicker: boolean;
+  onProjectSelect: (cwd: string) => void;
+  onProjectClear: () => void;
+  resolveNewSessionCwd: () => Promise<string>;
   onAgentEnd?: () => void;
   onSessionCreated?: (session: SessionInfo) => void;
   onSessionForked?: (newSessionId: string) => void;
@@ -186,7 +191,7 @@ function ProcessDetailsGroup({ durationMs, toolCallCount, children, t }: { durat
   );
 }
 
-export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onContextUsageChange, onOpenFile, playDoneSound, unlockAudio }: Props) {
+export function ChatWindow({ session, newSessionCwd, newTaskDraftId, showProjectPicker, onProjectSelect, onProjectClear, resolveNewSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onContextUsageChange, onOpenFile, playDoneSound, unlockAudio }: Props) {
   const { t } = useI18n();
   const isMinimapHidden = useIsMobile(400);
   const wrappedOnAgentEnd = useCallback(() => {
@@ -213,7 +218,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands,
   } = useAgentSession({
     session, newSessionCwd, onAgentEnd: wrappedOnAgentEnd, onSessionCreated, onSessionForked,
-    modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange,
+    modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, resolveNewSessionCwd,
   });
   const sessionBusy = agentRunning || bashRunning || isCompacting;
   const canCompact = messages.some((message) => message.role === "assistant" && (message as AssistantMessage).stopReason !== "error");
@@ -388,8 +393,15 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       onLoadSlashCommands={loadSlashCommands}
       onBuiltinCommand={handleBuiltinSlashCommand}
       onAudioUnlock={unlockAudio}
-      draftKey={session?.id ?? (newSessionCwd ? `new:${newSessionCwd}` : undefined)}
+      draftKey={session?.id ?? "new:task"}
       cwd={session?.cwd ?? newSessionCwd}
+      autoFocus={isNew}
+      projectPicker={showProjectPicker && isNew ? {
+        resetKey: newTaskDraftId ?? "new-task",
+        selectedCwd: newSessionCwd,
+        onSelect: onProjectSelect,
+        onClear: onProjectClear,
+      } : undefined}
     />
   );
 

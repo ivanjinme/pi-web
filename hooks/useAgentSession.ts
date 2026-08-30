@@ -109,6 +109,7 @@ export type BuiltinSlashCommandResult =
 export interface UseAgentSessionOptions {
   session: SessionInfo | null;
   newSessionCwd: string | null;
+  resolveNewSessionCwd: () => Promise<string>;
   onAgentEnd?: () => void;
   onSessionCreated?: (session: SessionInfo) => void;
   onSessionForked?: (newSessionId: string) => void;
@@ -244,10 +245,10 @@ type SlashCommandsResponse = {
 export function useAgentSession(opts: UseAgentSessionOptions) {
   const {
     session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked,
-    modelsRefreshKey, onBranchDataChange, onSystemPromptChange,
+    modelsRefreshKey, onBranchDataChange, onSystemPromptChange, resolveNewSessionCwd,
   } = opts;
 
-  const isNew = session === null && newSessionCwd !== null;
+  const isNew = session === null;
 
   const [data, setData] = useState<SessionData | null>(null);
   const [loading, setLoading] = useState(!isNew);
@@ -299,10 +300,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const ensuringNewSessionRef = useRef<Promise<string | null> | null>(null);
+  const resolvedNewSessionCwdRef = useRef<string | null>(newSessionCwd);
   const newSessionPromotedRef = useRef(false);
   const promptRunIdRef = useRef(0);
   const optimisticUserMessageKeyRef = useRef<string | null>(null);
   const compactingRef = useRef(false);
+
+  // Keep the resolved cwd in a ref without writing during render. Unconditional:
+  // clearing the draft's project (null) must also clear the ref. The resolve-
+  // on-send flow is safe because handleDraftProjectSelect queues the same cwd
+  // into this prop before handleSend reads the ref.
+  useEffect(() => {
+    resolvedNewSessionCwdRef.current = newSessionCwd;
+  }, [newSessionCwd]);
 
   const updateCompacting = useCallback((value: boolean) => {
     compactingRef.current = value;
@@ -443,23 +453,25 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const promoteNewSession = useCallback((messageCount = 0, firstMessage = "(no messages)") => {
     const sid = sessionIdRef.current;
-    if (!isNew || !newSessionCwd || !sid || newSessionPromotedRef.current) return;
+    const cwd = resolvedNewSessionCwdRef.current;
+    if (!isNew || !cwd || !sid || newSessionPromotedRef.current) return;
     newSessionPromotedRef.current = true;
     onSessionCreated?.({
       id: sid,
       path: "",
-      cwd: newSessionCwd,
+      cwd,
       name: undefined,
       created: new Date().toISOString(),
       modified: new Date().toISOString(),
       messageCount,
       firstMessage,
     });
-  }, [isNew, newSessionCwd, onSessionCreated]);
+  }, [isNew, onSessionCreated]);
 
   const ensureNewSession = useCallback(async () => {
     if (sessionIdRef.current) return sessionIdRef.current;
-    if (!isNew || !newSessionCwd) return sessionIdRef.current;
+    const cwd = resolvedNewSessionCwdRef.current;
+    if (!isNew || !cwd) return sessionIdRef.current;
     if (ensuringNewSessionRef.current) return ensuringNewSessionRef.current;
 
     const promise = (async () => {
@@ -470,7 +482,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          cwd: newSessionCwd,
+          cwd,
           type: "ensure_session",
           toolNames,
           ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
@@ -490,7 +502,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       ensuringNewSessionRef.current = null;
     }
-  }, [isNew, newSessionCwd, newSessionModel, newSessionDefaultModel, toolPreset, thinkingLevel]);
+  }, [isNew, newSessionModel, newSessionDefaultModel, toolPreset, thinkingLevel]);
 
   const loadSlashCommands = useCallback(async () => {
     const sid = sessionIdRef.current ?? await ensureNewSession();
@@ -962,17 +974,30 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
     const trimmedMessage = message.trim();
-    if (!trimmedMessage && !images?.length) return;
-    if (agentRunningRef.current || bashRunningRef.current || compactingRef.current) return;
+    if (!trimmedMessage && !images?.length) return false;
+    if (agentRunningRef.current || bashRunningRef.current || compactingRef.current) return false;
+
+    if (isNew && !resolvedNewSessionCwdRef.current) {
+      try {
+        const cwd = await resolveNewSessionCwd();
+        resolvedNewSessionCwdRef.current = cwd;
+      } catch (cause) {
+        addNotice({
+          type: "error",
+          message: `Failed to create the default workspace: ${cause instanceof Error ? cause.message : String(cause)}`,
+        });
+        return false;
+      }
+    }
     const isSlashCommandPrompt = !images?.length && trimmedMessage.startsWith("/");
 
     const isBashCommand = !images?.length && trimmedMessage.startsWith("!");
     if (isBashCommand) {
       const isExcluded = trimmedMessage.startsWith("!!");
       const bashCmd = (isExcluded ? trimmedMessage.slice(2) : trimmedMessage.slice(1)).trim();
-      if (!bashCmd) return;
+      if (!bashCmd) return false;
       await executeBashRef.current?.(bashCmd, isExcluded);
-      return;
+      return true;
     }
 
     const promptRunId = promptRunIdRef.current + 1;
@@ -998,7 +1023,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
     try {
       let sentSessionId: string | null = null;
-      if (isNew && newSessionCwd) {
+      if (isNew && resolvedNewSessionCwdRef.current) {
         const selectedModel = newSessionModel;
         const existingSid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
         const sid = existingSid ?? await ensureNewSession();
@@ -1055,7 +1080,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAgentPhase(null);
       dispatch({ type: "end" });
     }
-  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, opts.chatInputRef]);
+    return true;
+  }, [isNew, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, opts.chatInputRef, resolveNewSessionCwd]);
 
   const executeBash = useCallback(async (command: string, excludeFromContext: boolean) => {
     if (agentRunningRef.current || bashRunningRef.current) return;

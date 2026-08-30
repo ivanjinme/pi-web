@@ -55,8 +55,10 @@ export function AppShell() {
   const isMobile = useIsMobile();
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
-  // When user clicks +, we only store the cwd — no fake session id
+  // A draft id lets the composer exist before a project/cwd has been chosen.
+  const [newTaskDraftId, setNewTaskDraftId] = useState<string | null>(null);
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
+  const [newTaskShowsProjectPicker, setNewTaskShowsProjectPicker] = useState(false);
   const [initialCwdStatus, setInitialCwdStatus] = useState<"idle" | "validating" | "ready" | "error">(
     () => initialNavigation.requestedCwd ? "validating" : "idle",
   );
@@ -392,6 +394,8 @@ export function AppShell() {
     // recognize the newly selected session's project instead of clearing it as
     // though the user had merely switched projects.
     activeProjectRootRef.current = session.projectRoot ?? session.cwd;
+    setNewTaskDraftId(null);
+    setNewTaskShowsProjectPicker(false);
     setNewSessionCwd(null);
     setSelectedSession(session);
     // A session owns the entire ChatWindow state graph (messages, SSE, running
@@ -413,8 +417,12 @@ export function AppShell() {
     }
   }, [router, isMobile]);
 
-  const handleNewSession = useCallback((_sessionId: string, cwd: string) => {
+  const handleNewSession = useCallback((draftId: string, cwd: string | null) => {
     setSelectedSession(null);
+    setNewTaskDraftId(draftId);
+    // Always show the picker on new-task drafts: pre-filled with the current
+    // project (if any), switchable, or send to fall back to the default workspace.
+    setNewTaskShowsProjectPicker(true);
     setNewSessionCwd(cwd);
     setSessionKey((k) => k + 1);
     setBranchTree([]);
@@ -427,7 +435,7 @@ export function AppShell() {
 
   // Global keyboard shortcuts (handles Esc, Ctrl+Alt+N etc.)
   useGlobalKeyboardShortcuts({
-    onNewSession: (cwd: string) => handleNewSession(`kb-${Date.now()}`, cwd),
+    onNewSession: (cwd) => handleNewSession(`kb-${Date.now()}`, cwd),
     activeCwd,
   });
 
@@ -448,6 +456,8 @@ export function AppShell() {
 
   // Called by ChatWindow when the first message creates the real pi session.
   const handleSessionCreated = useCallback((session: SessionInfo) => {
+    setNewTaskDraftId(null);
+    setNewTaskShowsProjectPicker(false);
     setNewSessionCwd(null);
     setSelectedSession(session);
     setRefreshKey((k) => k + 1);
@@ -463,6 +473,8 @@ export function AppShell() {
   const handleSessionForked = useCallback((newSessionId: string) => {
     setRefreshKey((k) => k + 1);
     setSessionKey((k) => k + 1);
+    setNewTaskDraftId(null);
+    setNewTaskShowsProjectPicker(false);
     setNewSessionCwd(null);
     setSelectedSession((prev) => ({
       ...(prev ?? { path: "", cwd: "", created: "", modified: "", messageCount: 0, firstMessage: "" }),
@@ -610,9 +622,32 @@ export function AppShell() {
     );
   }, [selectedSession]);
 
-  // Show chat area if a session is selected, or if we have a cwd to start a new session in
+  const handleDraftProjectSelect = useCallback((cwd: string) => {
+    activeProjectRootRef.current = cwd;
+    setActiveCwd(cwd);
+    setNewSessionCwd(cwd);
+  }, []);
+
+  // Unbind the draft's project: back to no-project mode, where sending falls
+  // through to the default workspace. The draft composer itself stays open.
+  const handleDraftProjectClear = useCallback(() => {
+    activeProjectRootRef.current = null;
+    setActiveCwd(null);
+    setNewSessionCwd(null);
+  }, []);
+
+  const resolveDefaultWorkspace = useCallback(async (): Promise<string> => {
+    const response = await fetch("/api/cwd/default", { method: "POST" });
+    const data = await response.json().catch(() => ({})) as { cwd?: string; error?: string };
+    if (!response.ok || !data.cwd) throw new Error(data.error ?? `HTTP ${response.status}`);
+    const cwd = data.cwd;
+    handleDraftProjectSelect(cwd);
+    return cwd;
+  }, [handleDraftProjectSelect]);
+
+  // A selected cwd is required to create a session, but not to compose a draft.
   const effectiveNewSessionCwd = newSessionCwd ?? (selectedSession === null && activeCwd ? activeCwd : null);
-  const showChat = selectedSession !== null || effectiveNewSessionCwd !== null;
+  const showChat = selectedSession !== null || newTaskDraftId !== null || effectiveNewSessionCwd !== null;
   const projectTrustCwd = selectedSession?.cwd ?? effectiveNewSessionCwd;
   // While restoring initial session from URL, don't show the placeholder
   const showPlaceholder = initialSessionRestored && !showChat;
@@ -1314,6 +1349,11 @@ export function AppShell() {
               key={sessionKey}
               session={selectedSession}
               newSessionCwd={effectiveNewSessionCwd}
+              newTaskDraftId={newTaskDraftId}
+              showProjectPicker={newTaskShowsProjectPicker}
+              onProjectSelect={handleDraftProjectSelect}
+              onProjectClear={handleDraftProjectClear}
+              resolveNewSessionCwd={resolveDefaultWorkspace}
               onAgentEnd={handleAgentEnd}
               onSessionCreated={handleSessionCreated}
               onSessionForked={handleSessionForked}

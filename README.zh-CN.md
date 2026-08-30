@@ -1,6 +1,6 @@
 # Pi Web
 
-[English](./README.md) | [日本語](./README.ja.md)
+[English](./README.md)
 
 [pi 编程智能体](https://github.com/badlogic/pi-mono) 的本地网页界面。它会读取本机的 pi 会话文件，在浏览器里提供会话管理、实时对话、模型配置、技能管理和项目文件预览。
 
@@ -13,13 +13,13 @@ Pi Web 要求 Node.js 22.19.0 或更高版本。可通过 `node --version` 检�
 **无需安装，直接运行：**
 
 ```bash
-npx @agegr/pi-web@latest
+npx @weclio/pi-web@latest
 ```
 
 **或全局安装后使用：**
 
 ```bash
-npm install -g @agegr/pi-web
+npm install -g @weclio/pi-web
 pi-web
 ```
 
@@ -52,7 +52,7 @@ macOS 或 Linux：
 HTTP_PROXY=http://127.0.0.1:7890 \
 HTTPS_PROXY=http://127.0.0.1:7890 \
 NO_PROXY=localhost,127.0.0.1 \
-npx @agegr/pi-web@latest
+npx @weclio/pi-web@latest
 ```
 
 Windows PowerShell：
@@ -61,7 +61,7 @@ Windows PowerShell：
 $env:HTTP_PROXY = "http://127.0.0.1:7890"
 $env:HTTPS_PROXY = "http://127.0.0.1:7890"
 $env:NO_PROXY = "localhost,127.0.0.1"
-npx @agegr/pi-web@latest
+npx @weclio/pi-web@latest
 ```
 
 ## 功能介绍
@@ -79,6 +79,7 @@ npx @agegr/pi-web@latest
 - **会话文件**：路径形如 `~/.pi/agent/sessions/<编码后的工作目录>/<时间戳>_<uuid>.jsonl`。
 - **模型配置**：Models 面板读写 pi agent 目录下的 `models.json`，模型列表和默认模型由 pi 的配置解析得到。
 - **文件访问**：文件浏览和预览面向当前选择的项目目录，以及会话中已出现过的工作目录。
+- **默认工作目录**：未选择项目时直接发送新任务，会按需使用 `~/.weclio/default-workspace`。可通过 `PI_WEB_DEFAULT_CWD` 指定其他路径。
 - **Git worktree**：什么时候显示切换器、新建目录在哪里、删除会影响什么，见 [Pi Web 里的 Worktree](./docs/worktrees.zh-CN.md)。
 - **Fork 与会话内分支不同**：Fork 会创建新的 `.jsonl` 文件；“Edit from here” 是同一会话文件里的分支。
 
@@ -108,8 +109,8 @@ app/
     agent/          # 创建/驱动 AgentSession，提供 SSE 事件流
     auth/           # OAuth 和 API key 管理
     cwd/browse/     # 服务端目录浏览
+    cwd/default/    # 按需创建默认工作目录
     cwd/validate/   # 自定义工作目录校验
-    default-cwd/    # 获取 pi 默认工作目录
     files/          # 文件列表、读取、预览、watch
     home/           # 当前用户 home 目录
     models/         # 可用模型、默认模型、thinking levels

@@ -5,6 +5,7 @@ import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { loadModelsWithCache, withModelRuntimeError, type ModelsData } from "@/lib/models-cache";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 import { projectTrustReloadOptions } from "@/lib/project-trust";
+import { getDefaultWorkspacePath } from "@/lib/default-workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -95,21 +96,27 @@ const EMPTY_MODELS: ModelsData = {
 };
 
 export async function GET(req: Request) {
-  const requestedCwd = new URL(req.url).searchParams.get("cwd") || process.cwd();
-  const cwd = resolve(requestedCwd);
+  const requestedCwd = new URL(req.url).searchParams.get("cwd");
+  const cwd = resolve(requestedCwd ?? getDefaultWorkspacePath());
 
-  let cwdStat;
-  try {
-    cwdStat = await stat(cwd);
-  } catch {
-    return Response.json({ error: `Directory does not exist: ${cwd}` }, { status: 400 });
-  }
-  if (!cwdStat.isDirectory()) {
-    return Response.json({ error: `Not a directory: ${cwd}` }, { status: 400 });
-  }
-  const allowedRoots = await getAllowedFileRoots();
-  if (!isExistingFilePathAllowed(cwd, allowedRoots)) {
-    return Response.json({ error: "Access denied" }, { status: 403 });
+  // A cwd-less request comes from the projectless draft composer targeting the
+  // default workspace. That path is server-derived (never user input) and the
+  // directory is only materialized by POST /api/cwd/default when the first
+  // message is actually sent, so skip the existence/allow-list checks here.
+  if (requestedCwd) {
+    let cwdStat;
+    try {
+      cwdStat = await stat(cwd);
+    } catch {
+      return Response.json({ error: `Directory does not exist: ${cwd}` }, { status: 400 });
+    }
+    if (!cwdStat.isDirectory()) {
+      return Response.json({ error: `Not a directory: ${cwd}` }, { status: 400 });
+    }
+    const allowedRoots = await getAllowedFileRoots();
+    if (!isExistingFilePathAllowed(cwd, allowedRoots)) {
+      return Response.json({ error: "Access denied" }, { status: 403 });
+    }
   }
 
   try {
