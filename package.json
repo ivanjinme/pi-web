@@ -1,6 +1,6 @@
 {
   "name": "@weclio/pi-web",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Web UI for the pi coding agent",
   "homepage": "https://github.com/ivanjinme/pi-web#readme",
   "repository": {
