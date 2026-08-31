@@ -22,3 +22,19 @@ export function allowFileRoot(root: string): void {
   getAdditionalAllowedRoots().add(normalizedRoot);
   globalThis.__piAllowedRootsCache?.roots.add(normalizedRoot);
 }
+
+/** Replace an explicitly-authorized project root after its source folder changes. */
+export function replaceAllowedFileRoot(oldRoot: string, newRoot: string): void {
+  const comparable = (value: string) => {
+    const normalized = normalizeSlashes(value);
+    return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+  };
+  const oldKey = comparable(oldRoot);
+  const additionalRoots = getAdditionalAllowedRoots();
+  for (const root of additionalRoots) {
+    if (comparable(root) === oldKey) additionalRoots.delete(root);
+  }
+  additionalRoots.add(normalizeSlashes(newRoot));
+  // Force the next request to rebuild roots from the migrated session headers.
+  globalThis.__piAllowedRootsCache = undefined;
+}

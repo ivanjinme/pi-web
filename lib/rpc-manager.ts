@@ -1140,21 +1140,31 @@ export function getRpcSession(sessionId: string): AgentSessionWrapper | undefine
   return getRegistry().get(sessionId);
 }
 
-export function hasBusyRpcSessionForCwd(cwd: string): boolean {
-  const targetCwd = normalizeRpcCwd(cwd);
-  if (getStartingSessionCwds().has(targetCwd)) return true;
+export function hasBusyRpcSessionForCwds(cwds: Iterable<string>): boolean {
+  const targetCwds = new Set(Array.from(cwds, normalizeRpcCwd));
+  for (const cwd of targetCwds) {
+    if (getStartingSessionCwds().has(cwd)) return true;
+  }
   return Array.from(getRegistry().values()).some(
-    (session) => normalizeRpcCwd(session.cwd) === targetCwd && session.isRunning(),
+    (session) => targetCwds.has(normalizeRpcCwd(session.cwd)) && session.isRunning(),
   );
 }
 
-export async function destroyRpcSessionsForCwd(cwd: string): Promise<number> {
-  const targetCwd = normalizeRpcCwd(cwd);
+export function hasBusyRpcSessionForCwd(cwd: string): boolean {
+  return hasBusyRpcSessionForCwds([cwd]);
+}
+
+export async function destroyRpcSessionsForCwds(cwds: Iterable<string>): Promise<number> {
+  const targetCwds = new Set(Array.from(cwds, normalizeRpcCwd));
   const sessions = Array.from(getRegistry().values()).filter(
-    (session) => normalizeRpcCwd(session.cwd) === targetCwd,
+    (session) => targetCwds.has(normalizeRpcCwd(session.cwd)),
   );
   await Promise.all(sessions.map((session) => session.shutdown()));
   return sessions.length;
+}
+
+export async function destroyRpcSessionsForCwd(cwd: string): Promise<number> {
+  return destroyRpcSessionsForCwds([cwd]);
 }
 
 export function getRunningRpcSessionIds(): string[] {

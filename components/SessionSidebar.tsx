@@ -14,7 +14,16 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { SessionInfo } from "@/lib/types";
-import { loadProjectFolders, saveProjectFolders } from "@/lib/project-folders";
+import {
+  PROJECT_FOLDERS_CHANGED_EVENT,
+  forgetProjectFolder,
+  isProjectFolderHidden,
+  loadHiddenProjectFolders,
+  loadProjectFolders,
+  projectPathKey,
+  rememberProjectFolder,
+  replaceProjectFolder,
+} from "@/lib/project-folders";
 import { useI18n } from "@/hooks/useI18n";
 import { DirectoryPicker } from "./DirectoryPicker";
 
@@ -258,55 +267,101 @@ function FolderIcon({ size }: { size: number }): ReactNode {
   );
 }
 
+interface ProjectRemoveConfirmDialogProps {
+  label: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}
+
+function ProjectRemoveConfirmDialog({ label, onCancel, onConfirm }: ProjectRemoveConfirmDialogProps) {
+  return createPortal(
+    <div
+      className="project-remove-confirm-backdrop"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="project-remove-confirm-title"
+      onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          onCancel();
+        }
+      }}
+    >
+      <div className="project-remove-confirm-panel">
+        <header>
+          <h2 id="project-remove-confirm-title">Remove {label}?</h2>
+          <button type="button" onClick={onCancel} aria-label="Close">×</button>
+        </header>
+        <p>This only removes the project from Weclio. Files on your computer and existing chats won’t be deleted.</p>
+        <footer>
+          <button type="button" className="is-secondary" onClick={onCancel}>Cancel</button>
+          <button type="button" className="is-danger" onClick={onConfirm}>Remove project</button>
+        </footer>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 interface ProjectEditDialogProps {
   root: string;
   initialName: string;
+  hasRunningTasks: boolean;
   onCancel: () => void;
-  onSave: (previousRoot: string, nextRoot: string, name: string) => void;
+  onRemove: (root: string) => void;
+  onSave: (previousRoot: string, nextRoot: string, name: string) => Promise<void>;
 }
 
-function ProjectEditDialog({ root, initialName, onCancel, onSave }: ProjectEditDialogProps) {
+function ProjectEditDialog({ root, initialName, hasRunningTasks, onCancel, onRemove, onSave }: ProjectEditDialogProps) {
   const [name, setName] = useState(initialName);
-  const [path, setPath] = useState(root);
+  const [sourceFolder, setSourceFolder] = useState<string | null>(root);
+  const [nameEdited, setNameEdited] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const save = useCallback(async () => {
-    const candidate = path.trim();
-    if (!candidate || busy) return;
+    if (!sourceFolder || busy || hasRunningTasks) return;
     setBusy(true);
     setError(null);
     try {
       const response = await fetch("/api/cwd/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd: candidate }),
+        body: JSON.stringify({ cwd: sourceFolder }),
       });
       const data = await response.json().catch(() => ({})) as { cwd?: string; error?: string };
       if (!response.ok || data.error) {
         setError(data.error ?? `HTTP ${response.status}`);
         return;
       }
-      const nextRoot = data.cwd ?? candidate;
-      onSave(root, nextRoot, name.trim() || projectDefaultLabel(nextRoot));
+      const nextRoot = data.cwd ?? sourceFolder;
+      await onSave(root, nextRoot, name.trim() || projectDefaultLabel(nextRoot));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
     }
-  }, [busy, name, onSave, path, root]);
+  }, [busy, hasRunningTasks, name, onSave, root, sourceFolder]);
+
+  const chooseFolder = useCallback(() => {
+    setError(null);
+    setPickerOpen(true);
+  }, []);
 
   function closeOnBackdrop(event: ReactMouseEvent<HTMLDivElement>): void {
     if (event.target === event.currentTarget && !busy) onCancel();
   }
 
   function closeOnEscape(event: ReactKeyboardEvent<HTMLDivElement>): void {
-    if (event.key === "Escape" && !busy && !pickerOpen) onCancel();
+    if (event.key === "Escape" && !busy && !pickerOpen && !confirmRemove) onCancel();
   }
 
   function selectFolder(nextPath: string): void {
-    setPath(nextPath);
+    setSourceFolder(nextPath);
+    if (!nameEdited) setName(projectDefaultLabel(nextPath));
     setPickerOpen(false);
     setError(null);
   }
@@ -330,25 +385,51 @@ function ProjectEditDialog({ root, initialName, onCancel, onSave }: ProjectEditD
             <span className="project-editor-folder-icon"><FolderIcon size={20} /></span>
             <input
               value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder={projectDefaultLabel(path)}
+              onChange={(event) => { setName(event.target.value); setNameEdited(true); }}
+              placeholder={projectDefaultLabel(sourceFolder ?? root)}
               autoFocus
             />
           </label>
           <h3>Source folder</h3>
           <div className="project-editor-source">
-            <div><FolderIcon size={20} /><span>{path}</span></div>
-            <button type="button" onClick={() => setPickerOpen(true)}>Change folder</button>
+            {sourceFolder ? (
+              <div className="project-editor-source-row">
+                <FolderIcon size={20} />
+                <span title={sourceFolder}>{sourceFolder}</span>
+                <button
+                  type="button"
+                  className="project-editor-source-remove"
+                  onClick={() => { setSourceFolder(null); setError(null); }}
+                  disabled={busy}
+                  aria-label="Remove source folder"
+                  title="Remove source folder"
+                >×</button>
+              </div>
+            ) : (
+              <button type="button" className="project-editor-source-choose" onClick={chooseFolder} disabled={busy}>
+                <FolderIcon size={18} />
+                <span>Choose folder</span>
+              </button>
+            )}
           </div>
+          {hasRunningTasks && <div className="project-editor-notice">Stop the running task before changing this project.</div>}
           {error && <div className="project-editor-error">{error}</div>}
         </div>
         <footer className="project-editor-footer">
+          <button type="button" className="is-danger" onClick={() => setConfirmRemove(true)} disabled={busy}>Remove project</button>
           <button type="button" className="is-secondary" onClick={onCancel} disabled={busy}>Cancel</button>
-          <button type="button" className="is-primary" onClick={() => void save()} disabled={busy || !path.trim()}>
+          <button type="button" className="is-primary" onClick={() => void save()} disabled={busy || !sourceFolder || hasRunningTasks}>
             {busy ? "Saving…" : "Save"}
           </button>
         </footer>
       </div>
+      {confirmRemove && (
+        <ProjectRemoveConfirmDialog
+          label={name.trim() || projectDefaultLabel(root)}
+          onCancel={() => setConfirmRemove(false)}
+          onConfirm={() => onRemove(root)}
+        />
+      )}
       {pickerOpen && <DirectoryPicker onCancel={() => setPickerOpen(false)} onSelect={selectFolder} />}
     </div>,
     document.body,
@@ -562,9 +643,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [allProjectsVisible, setAllProjectsVisible] = useState(false);
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(() => new Set());
   const [projectFolders, setProjectFolders] = useState<string[]>([]);
+  const [hiddenProjectFolders, setHiddenProjectFolders] = useState<string[]>(() => loadHiddenProjectFolders());
   const [pinnedProjects, setPinnedProjects] = useState<Set<string>>(() => new Set());
   const [projectLabels, setProjectLabels] = useState<Record<string, string>>({});
   const [editingProject, setEditingProject] = useState<string | null>(null);
+  const [removingProject, setRemovingProject] = useState<string | null>(null);
   const sessionSearchRef = useRef<HTMLInputElement>(null);
   const [customPathOpen, setCustomPathOpen] = useState(false);
   const [customPathValue, setCustomPathValue] = useState("");
@@ -588,9 +671,15 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const sseAuthoritativeRef = useRef(false);
 
   useEffect(() => {
-    setProjectFolders(loadProjectFolders());
+    const reloadProjectFolders = () => {
+      setProjectFolders(loadProjectFolders());
+      setHiddenProjectFolders(loadHiddenProjectFolders());
+    };
+    reloadProjectFolders();
     setPinnedProjects(new Set(loadStringArray(PINNED_PROJECTS_STORAGE_KEY)));
     setProjectLabels(loadProjectLabels());
+    window.addEventListener(PROJECT_FOLDERS_CHANGED_EVENT, reloadProjectFolders);
+    return () => window.removeEventListener(PROJECT_FOLDERS_CHANGED_EVENT, reloadProjectFolders);
   }, []);
 
   const loadSessions = useCallback(async (showLoading = false) => {
@@ -771,10 +860,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         // Session not found — notify parent so it can show the placeholder
         onInitialRestoreDone?.();
       }
-      const projects = getRecentProjects(allSessions);
+      const visibleSessions = allSessions.filter((session) =>
+        !isProjectFolderHidden(session.projectRoot ?? session.cwd, hiddenProjectFolders)
+      );
+      const projects = getRecentProjects(visibleSessions);
       if (projects.length > 0) setSelectedCwd(projects[0]);
     }
-  }, [allSessions, selectedCwd, initialSessionId, skipInitialProjectSelection, onSelectSession, onInitialRestoreDone]);
+  }, [allSessions, hiddenProjectFolders, selectedCwd, initialSessionId, skipInitialProjectSelection, onSelectSession, onInitialRestoreDone]);
 
   const commitCustomPath = useCallback(async (candidate?: string) => {
     const path = (candidate ?? customPathValue).trim();
@@ -794,11 +886,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         return;
       }
       const validatedPath = data.cwd ?? path;
-      setProjectFolders((previous) => {
-        const next = previous.includes(validatedPath) ? previous : [...previous, validatedPath];
-        saveProjectFolders(next);
-        return next;
-      });
+      setProjectFolders(rememberProjectFolder(validatedPath));
       setSelectedCwd(validatedPath);
       setCustomPathOpen(false);
       setCustomPathValue("");
@@ -933,13 +1021,18 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     });
   }, []);
 
-  const saveProjectEdit = useCallback((previousRoot: string, nextRoot: string, name: string) => {
-    setProjectFolders((previous) => {
-      const withoutOld = previous.filter((path) => path !== previousRoot);
-      const next = withoutOld.includes(nextRoot) ? withoutOld : [...withoutOld, nextRoot];
-      saveProjectFolders(next);
-      return next;
-    });
+  const saveProjectEdit = useCallback(async (previousRoot: string, nextRoot: string, name: string) => {
+    if (previousRoot !== nextRoot) {
+      const response = await fetch("/api/projects/rebind", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ oldRoot: previousRoot, newRoot: nextRoot }),
+      });
+      const data = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
+    }
+
+    setProjectFolders(replaceProjectFolder(previousRoot, nextRoot));
     setProjectLabels((previous) => {
       const next = { ...previous };
       delete next[previousRoot];
@@ -956,6 +1049,28 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       return next;
     });
     if (projectRootFor(selectedCwd) === previousRoot) setSelectedCwd(nextRoot);
+    await loadSessions(false);
+    setEditingProject(null);
+  }, [loadSessions, projectRootFor, selectedCwd]);
+
+  const removeLocalProject = useCallback((root: string) => {
+    setProjectFolders(forgetProjectFolder(root));
+    setProjectLabels((previous) => {
+      if (!(root in previous)) return previous;
+      const next = { ...previous };
+      delete next[root];
+      saveProjectLabels(next);
+      return next;
+    });
+    setPinnedProjects((previous) => {
+      if (!previous.has(root)) return previous;
+      const next = new Set(previous);
+      next.delete(root);
+      saveStringArray(PINNED_PROJECTS_STORAGE_KEY, [...next]);
+      return next;
+    });
+    if (projectRootFor(selectedCwd) === root) setSelectedCwd(null);
+    setHighlightedProjectRoot(null);
     setEditingProject(null);
   }, [projectRootFor, selectedCwd]);
 
@@ -969,10 +1084,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     const groups = new Map<string, { root: string; sessions: SessionInfo[]; modified: string }>();
 
     for (const session of allSessions) {
+      const root = session.projectRoot ?? session.cwd;
+      if (isProjectFolderHidden(root, hiddenProjectFolders)) continue;
       if (normalizedSessionSearch && ![session.name, session.firstMessage, session.cwd]
         .some((value) => value?.toLowerCase().includes(normalizedSessionSearch))) continue;
 
-      const root = session.projectRoot ?? session.cwd;
       const group = groups.get(root);
       if (group) {
         group.sessions.push(session);
@@ -984,9 +1100,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
     if (!normalizedSessionSearch) {
       for (const root of projectFolders) {
-        if (!groups.has(root)) groups.set(root, { root, sessions: [], modified: "" });
+        if (!isProjectFolderHidden(root, hiddenProjectFolders) && !groups.has(root)) {
+          groups.set(root, { root, sessions: [], modified: "" });
+        }
       }
-      if (selectedProject && !groups.has(selectedProject)) {
+      if (selectedProject && !isProjectFolderHidden(selectedProject, hiddenProjectFolders) && !groups.has(selectedProject)) {
         groups.set(selectedProject, { root: selectedProject, sessions: [], modified: "" });
       }
     }
@@ -997,7 +1115,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         return pinDifference || b.modified.localeCompare(a.modified);
       })
       .map((group) => ({ ...group, roots: buildSessionTree(group.sessions) }));
-  }, [allSessions, normalizedSessionSearch, pinnedProjects, projectFolders, selectedProject]);
+  }, [allSessions, hiddenProjectFolders, normalizedSessionSearch, pinnedProjects, projectFolders, selectedProject]);
 
   const visibleProjectGroups = useMemo(() => {
     if (normalizedSessionSearch || allProjectsVisible || projectGroups.length <= 5) return projectGroups;
@@ -1024,8 +1142,23 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         <ProjectEditDialog
           root={editingProject}
           initialName={projectLabels[editingProject] || projectDefaultLabel(editingProject)}
+          hasRunningTasks={allSessions.some((session) =>
+            runningSessionIds.has(session.id)
+            && projectPathKey(session.projectRoot ?? session.cwd) === projectPathKey(editingProject)
+          )}
           onCancel={() => setEditingProject(null)}
+          onRemove={removeLocalProject}
           onSave={saveProjectEdit}
+        />
+      )}
+      {removingProject && (
+        <ProjectRemoveConfirmDialog
+          label={projectLabels[removingProject] || projectDefaultLabel(removingProject)}
+          onCancel={() => setRemovingProject(null)}
+          onConfirm={() => {
+            removeLocalProject(removingProject);
+            setRemovingProject(null);
+          }}
         />
       )}
       {customPathOpen && (
@@ -1457,6 +1590,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   <button type="button" role="menuitem" onClick={() => setEditingProject(group.root)}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" /></svg>
                     <span>Edit</span>
+                  </button>
+                  <button type="button" role="menuitem" className="is-danger" onClick={() => setRemovingProject(group.root)}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="m19 6-1 14H6L5 6" /><path d="M10 11v5M14 11v5" /></svg>
+                    <span>Remove</span>
                   </button>
                 </SidebarMoreMenu>
                 <button type="button" className="project-new-task" onClick={() => createNewSession(group.root)} aria-label={`New task in ${label}`}>

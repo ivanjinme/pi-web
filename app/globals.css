@@ -1309,6 +1309,7 @@ span.linenumber {
 
 .project-editor-source > div span {
   min-width: 0;
+  flex: 1;
   overflow: hidden;
   color: var(--text);
   font-family: var(--font-mono);
@@ -1317,12 +1318,38 @@ span.linenumber {
   white-space: nowrap;
 }
 
+.project-editor-source-remove {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.project-editor-source-remove:hover,
+.project-editor-source-remove:focus-visible {
+  outline: none;
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
 .project-editor-source > button {
+  display: flex;
   width: 100%;
-  min-height: 36px;
+  min-height: 42px;
+  align-items: center;
+  gap: 9px;
   padding: 0 12px;
   border: 0;
-  border-top: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text-muted);
   cursor: pointer;
@@ -1332,6 +1359,8 @@ span.linenumber {
 }
 
 .project-editor-source > button:hover { background: var(--bg-hover); color: var(--text); }
+.project-editor-source button:disabled { cursor: default; opacity: 0.55; }
+.project-editor-notice { margin-top: 9px; color: var(--text-muted); font-size: 11px; }
 .project-editor-error { margin-top: 8px; color: #dc2626; font-size: 11px; }
 
 .project-editor-footer {
@@ -1355,7 +1384,95 @@ span.linenumber {
 
 .project-editor-footer button.is-secondary { border: 1px solid var(--border); background: var(--bg); color: var(--text-muted); }
 .project-editor-footer button.is-primary { border: 0; background: var(--accent); color: #fff; font-weight: 600; }
+.project-editor-footer button.is-danger {
+  margin-right: auto;
+  border: 1px solid color-mix(in srgb, #ef4444 24%, var(--border));
+  background: color-mix(in srgb, #ef4444 9%, var(--bg));
+  color: #dc2626;
+}
 .project-editor-footer button:disabled { cursor: default; opacity: 0.55; }
+
+.project-remove-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.38);
+}
+
+.project-remove-confirm-panel {
+  width: min(440px, calc(100vw - 24px));
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.24);
+}
+
+.project-remove-confirm-panel > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.project-remove-confirm-panel h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.project-remove-confirm-panel > header button {
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 21px;
+  line-height: 1;
+}
+
+.project-remove-confirm-panel p {
+  margin: 12px 0 20px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.project-remove-confirm-panel > footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.project-remove-confirm-panel > footer button {
+  min-width: 94px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.project-remove-confirm-panel > footer .is-secondary {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-muted);
+}
+
+.project-remove-confirm-panel > footer .is-danger {
+  border: 1px solid color-mix(in srgb, #ef4444 24%, var(--border));
+  background: color-mix(in srgb, #ef4444 10%, var(--bg));
+  color: #dc2626;
+  font-weight: 600;
+}
 
 .project-sessions { margin-top: 0; }
 .project-sessions .session-tree-item { margin-left: 20px; }

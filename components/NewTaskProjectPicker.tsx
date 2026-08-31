@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { SessionInfo } from "@/lib/types";
-import { loadProjectFolders, rememberProjectFolder } from "@/lib/project-folders";
+import {
+  PROJECT_FOLDERS_CHANGED_EVENT,
+  isProjectFolderHidden,
+  loadHiddenProjectFolders,
+  loadProjectFolders,
+  rememberProjectFolder,
+} from "@/lib/project-folders";
 import { useI18n } from "@/hooks/useI18n";
 import { DirectoryPicker } from "./DirectoryPicker";
 
@@ -20,11 +26,29 @@ interface ProjectEntry {
   modified: string;
 }
 
-const normalizeRoot = (path: string): string =>
-  path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+function normalizeRoot(path: string): string {
+  return path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
 
 function projectName(cwd: string): string {
   return cwd.replace(/\\/g, "/").split("/").filter(Boolean).at(-1) || cwd;
+}
+
+function buildProjectEntries(localRoots: string[], sessions: SessionInfo[] = []): ProjectEntry[] {
+  const byRoot = new Map<string, ProjectEntry>();
+  for (const root of localRoots) byRoot.set(normalizeRoot(root), { root, modified: "" });
+  for (const session of sessions) {
+    const root = session.projectRoot ?? session.cwd;
+    const key = normalizeRoot(root);
+    const existing = byRoot.get(key);
+    if (!existing || session.modified > existing.modified) {
+      byRoot.set(key, { root, modified: session.modified });
+    }
+  }
+  return [...byRoot.values()].sort((a, b) => {
+    if (a.modified !== b.modified) return a.modified < b.modified ? 1 : -1;
+    return a.root.localeCompare(b.root);
+  });
 }
 
 export function NewTaskProjectPicker({ resetKey, selectedCwd, onSelect, onClear, onFocusComposer }: Props) {
@@ -36,6 +60,7 @@ export function NewTaskProjectPicker({ resetKey, selectedCwd, onSelect, onClear,
   const [entries, setEntries] = useState<ProjectEntry[]>(() =>
     loadProjectFolders().map((root) => ({ root, modified: "" })),
   );
+  const [hiddenProjectFolders, setHiddenProjectFolders] = useState<string[]>(() => loadHiddenProjectFolders());
   const [position, setPosition] = useState<{ left: number; bottom: number } | null>(null);
   const [directoryPickerOpen, setDirectoryPickerOpen] = useState(false);
   const [validating, setValidating] = useState(false);
@@ -43,6 +68,27 @@ export function NewTaskProjectPicker({ resetKey, selectedCwd, onSelect, onClear,
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const entriesRequestRef = useRef<AbortController | null>(null);
+
+  const refreshEntries = useCallback(async () => {
+    entriesRequestRef.current?.abort();
+    const controller = new AbortController();
+    entriesRequestRef.current = controller;
+    const localRoots = loadProjectFolders();
+    // Replace immediately so a removed/rebound local root cannot linger while
+    // the fresh session list is in flight.
+    setEntries(buildProjectEntries(localRoots));
+    try {
+      const response = await fetch("/api/sessions", { signal: controller.signal });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json() as { sessions?: SessionInfo[] };
+      if (!controller.signal.aborted) setEntries(buildProjectEntries(localRoots, data.sessions));
+    } catch {
+      // Keep the localStorage snapshot on abort or while offline.
+    } finally {
+      if (entriesRequestRef.current === controller) entriesRequestRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     setOpen(false);
@@ -50,6 +96,19 @@ export function NewTaskProjectPicker({ resetKey, selectedCwd, onSelect, onClear,
     setError(null);
     setQuery("");
   }, [resetKey]);
+
+  useEffect(() => {
+    const reloadProjects = () => {
+      setHiddenProjectFolders(loadHiddenProjectFolders());
+      if (open) void refreshEntries();
+      else {
+        entriesRequestRef.current?.abort();
+        setEntries(buildProjectEntries(loadProjectFolders()));
+      }
+    };
+    window.addEventListener(PROJECT_FOLDERS_CHANGED_EVENT, reloadProjects);
+    return () => window.removeEventListener(PROJECT_FOLDERS_CHANGED_EVENT, reloadProjects);
+  }, [open, refreshEntries]);
 
   // Anchor the popover right above the trigger button.
   useEffect(() => {
@@ -85,44 +144,25 @@ export function NewTaskProjectPicker({ resetKey, selectedCwd, onSelect, onClear,
     };
   }, [open]);
 
-  // Projects that actually exist on the server come from session records, so
-  // the list survives cleared browser storage. localStorage only supplements.
+  // Session-derived projects are rebuilt from server truth whenever the picker
+  // opens; replacing rather than merging also removes stale rebound roots.
   useEffect(() => {
-    if (!open) return;
-    const controller = new AbortController();
-    fetch("/api/sessions", { signal: controller.signal })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data: { sessions?: SessionInfo[] } | null) => {
-        if (!data?.sessions) return;
-        setEntries((previous) => {
-          const byRoot = new Map<string, ProjectEntry>();
-          for (const entry of previous) {
-            if (!byRoot.has(normalizeRoot(entry.root))) byRoot.set(normalizeRoot(entry.root), entry);
-          }
-          for (const session of data.sessions ?? []) {
-            const root = session.projectRoot ?? session.cwd;
-            const key = normalizeRoot(root);
-            const existing = byRoot.get(key);
-            if (!existing || session.modified > existing.modified) byRoot.set(key, { root, modified: session.modified });
-          }
-          return [...byRoot.values()].sort((a, b) => {
-            // Most recently active first; ties fall back to alphabetical path order.
-            if (a.modified !== b.modified) return a.modified < b.modified ? 1 : -1;
-            return a.root.localeCompare(b.root);
-          });
-        });
-      })
-      .catch(() => { /* aborted or offline — keep the localStorage seed */ });
-    return () => controller.abort();
-  }, [open]);
+    if (!open) {
+      entriesRequestRef.current?.abort();
+      return;
+    }
+    void refreshEntries();
+    return () => entriesRequestRef.current?.abort();
+  }, [open, refreshEntries]);
 
   const filtered = useMemo(() => {
+    const visible = entries.filter((entry) => !isProjectFolderHidden(entry.root, hiddenProjectFolders));
     const q = query.trim().toLowerCase();
-    if (!q) return entries;
-    return entries.filter((entry) =>
+    if (!q) return visible;
+    return visible.filter((entry) =>
       entry.root.toLowerCase().includes(q) || projectName(entry.root).toLowerCase().includes(q),
     );
-  }, [entries, query]);
+  }, [entries, hiddenProjectFolders, query]);
 
   const chooseProject = useCallback((cwd: string) => {
     onSelect(cwd);
