@@ -42,10 +42,13 @@ app/api/
   sessions/route.ts               GET  list all sessions
   sessions/[id]/route.ts          GET/PATCH/DELETE session
   sessions/[id]/context/route.ts  GET ?leafId= — context for a specific leaf
+  sessions/[id]/state/route.ts    GET live wrapper state without starting one
+  sessions/[id]/entries/[entryId]/thinking/route.ts GET deferred thinking block
   sessions/[id]/export/route.ts   GET exported HTML for a session
   agent/new/route.ts              POST { cwd, message, toolPreset?, toolNames?, provider?, modelId? }
   agent/[id]/route.ts             GET state | POST any command
   agent/[id]/events/route.ts      GET SSE stream
+  agent/[id]/bash-output/route.ts GET/download session-referenced full bash output
   agent/running/events/route.ts   GET SSE stream of currently-running session ids
   auth/all-providers/route.ts     GET API-key provider list
   auth/api-key/[provider]/route.ts GET/POST/DELETE provider API key status/storage
@@ -54,8 +57,12 @@ app/api/
   auth/providers/route.ts         GET OAuth provider list
   cwd/validate/route.ts           POST validate/select a cwd
   cwd/default/route.ts            POST lazily create the fallback workspace
-  files/[...path]/route.ts        GET file contents for viewer
-  home/route.ts                   GET user home directory
+  files/[...path]/route.ts        GET list/read/preview/watch/download; POST upload
+  file-index/route.ts             GET cached @-mention file index/search
+  git/status/route.ts             GET file-tree Git status
+  git/diff/route.ts               GET file diff
+  project-trust/route.ts          GET/POST project resource trust
+  projects/rebind/route.ts        POST migrate persisted project cwd
   models/route.ts                 GET { models, modelList, defaultModel }
   models-config/route.ts          GET/PUT — read/write ~/.pi/agent/models.json
   models-config/default/route.ts  PUT — persist last-selected model as global default
@@ -63,47 +70,49 @@ app/api/
   plugins/route.ts                GET/POST package plugin management
   skills/route.ts                 GET/PATCH loaded skills and disable-model-invocation
   skills/install/route.ts         POST install skills through npx skills add
-  skills/search/route.ts          GET/POST skills.sh search
+  skills/search/route.ts          POST skills.sh search
   worktrees/route.ts              GET/POST/DELETE git worktrees
 
 lib/
   agent-client.ts      typed fetch helper for /api/agent commands
-  draft-store.ts       local draft persistence helpers
-  file-access.ts       allowed file roots for /api/files and worktrees
+  agent-event-wire.ts  Pi events → browser SSE shape
+  streaming-message.ts streaming assistant-message reducer
+  allowed-roots.ts     hot-reload-safe explicit file roots
+  file-access.ts       derive/check roots for file/project APIs
+  path-security.ts     realpath-aware root containment
   file-paths.ts        client/server path encoding helpers
   markdown.ts          shared markdown helpers
-  npx.ts               npx runner used by skill install
+  npx.ts               bounded npx runner used by skills
   pi-types.ts          local structural types for pi SDK objects
-  rpc-manager.ts      AgentSessionWrapper + registry + startRpcSession
-  session-reader.ts   SessionManager wrappers + path cache + buildSessionContext adapter
-  tool-presets.ts     dynamic preset generation + getPresetFromTools()
-  types.ts            shared TypeScript types
-  normalize.ts        normalizeToolCalls() — field name mismatch between file format and our types
-  worktree.ts         project/worktree resolution and git worktree operations
+  project-trust.ts     gate executable project resources
+  project-folders.ts   remembered/hidden client project roots
+  request-security.ts  Origin/Host/Content-Type guards
+  rpc-manager.ts       AgentSessionWrapper + registry + startRpcSession
+  session-reader.ts    SessionManager wrappers + path cache + buildSessionContext adapter
+  session-file-references.ts authorize session-referenced file/bash reads
+  skills-service.ts    runtime-equivalent skill loading
+  skill-frontmatter.ts surgical disable-model-invocation edits
+  tool-presets.ts      dynamic preset generation + getPresetFromTools()
+  types.ts             shared TypeScript types
+  normalize.ts         persisted toolCall fields → browser fields
+  worktree.ts          project/worktree resolution and git worktree operations
 
 components/
   AppShell.tsx        layout + URL state + tab management
   SessionSidebar.tsx  session tree + FileExplorer
-  ChatWindow.tsx      chat composition + completion sound wrapper
+  ChatWindow.tsx      chat composition + process/extension UI
   ChatInput.tsx       input bar + model/thinking/tools/compact controls
   MessageView.tsx     renders one message (user/assistant/toolCall/toolResult)
   BranchNavigator.tsx in-session branch switcher
-  ChatMinimap.tsx     scroll minimap alongside the message list
   MarkdownBody.tsx    markdown renderer
-  ModelsConfig.tsx    modal for editing models.json (opened from sidebar bottom)
-  PluginsConfig.tsx   modal for installed package plugins
-  SkillsConfig.tsx    modal for loaded/search/installable skills
-  FileExplorer.tsx    file tree inside sidebar
-  FileIcons.tsx       file icon helpers
+  ModelsConfig.tsx    model/provider/auth configuration
+  PluginsConfig.tsx   plugin package management
+  SkillsConfig.tsx    loaded/search/install/update skills
+  FileExplorer.tsx    file tree, uploads, Git changes
   FileViewer.tsx      file content in a tab
-  TabBar.tsx          tab bar (Chat + open file tabs)
 
 hooks/
   useAgentSession.ts  messages + streaming + SSE + fork/navigate/reconciliation logic
-  useAudio.ts         completion sound + browser AudioContext unlock
-  useDragDrop.ts      shared drag/drop state
-  useIsMobile.ts      responsive breakpoint hook
-  useTheme.ts         theme state
 ```
 
 ---
@@ -115,20 +124,18 @@ hooks/
 - `globalThis` survives Next.js hot-reload; plain module-level Map does not
 - Idle timeout: 10 minutes. Concurrent `startRpcSession()` calls share a single start Promise (`globalThis.__piStartLocks`)
 
-### Fork must destroy the wrapper immediately
-`AgentSession.fork()` **mutates the wrapper's inner state in-place** — after fork, `inner.sessionId` is the *new* session's id. If the wrapper stays alive in the registry under the old id, the next request gets the already-forked state and subsequent forks produce a corrupt `parentSession` chain.
-
-**Fix**: `send("fork")` captures `newSessionId`, then calls `this.destroy()` before returning. The next request for the original session reloads a clean AgentSession from the original file.
+### Fork must retire the original wrapper
+Fork uses `SessionManager.create()` / `createBranchedSession()` (not `AgentSession.fork()`), caches the child id, then `await this.shutdown()` on the original wrapper. Never leave that wrapper registered after creating the child file.
 
 ### Two kinds of branching — don't confuse them
-- **Fork** (Fork button on user message): creates a new independent `.jsonl` file. Shown as a child in the sidebar tree via `parentSession` header field.
+- **Fork / New chat**: new independent `.jsonl`; user-message fork branches before the prompt, assistant-message fork includes that response. Sidebar lineage via `parentSession`.
 - **In-session branch** (Continue button / BranchNavigator): calls `navigate_tree` within the same file. Multiple entries share the same `parentId`. Switching between them calls `/api/sessions/[id]/context?leafId=`.
 
 ### Session files can be fully rewritten
 `parentSession` in the header is **display metadata only** — has zero effect on chat content. Safe to `writeFileSync` the entire file (pi does this itself during migrations). Used when cascade-reparenting children on delete.
 
 ### ToolCall field normalization
-Pi stores toolCall blocks as `{type:"toolCall", id, name, arguments}` but `ToolCallContent` uses `{toolCallId, toolName, input}`. `normalizeToolCalls()` in `lib/normalize.ts` handles this — called in both `session-reader.ts` (file load) and `ChatWindow.handleAgentEvent()` (streaming).
+Pi stores toolCall blocks as `{type:"toolCall", id, name, arguments}` but `ToolCallContent` uses `{toolCallId, toolName, input}`. `normalizeToolCalls()` in `lib/normalize.ts` handles this — called in `session-reader.ts` (file load) and `useAgentSession`/`streaming-message.ts` (streaming).
 
 ### Tool presets
 - UI requests use `toolPreset`; `toolNames[]` remains an exact list and is never inferred as a preset. Restored sessions without either are left unchanged.
@@ -136,13 +143,13 @@ Pi stores toolCall blocks as `{type:"toolCall", id, name, arguments}` but `ToolC
 - Shell availability is probed once per process with Pi helpers and cached on `globalThis`. Full filters unavailable shells and discovers built-ins via `sourceInfo.source === "builtin"`.
 
 ### Model defaults for new sessions
-`GET /api/models` returns `defaultModel` read from `~/.pi/agent/settings.json`. `ChatWindow` pre-selects this on mount for new sessions. Picking a model in the dropdown fire-and-forgets `PUT /api/models-config/default`, so the selection is remembered as the global default (also picked up by the pi CLI).
+`GET /api/models` returns `defaultModel` from `~/.pi/agent/settings.json`; new-session state preselects it. Model selection fire-and-forgets `PUT /api/models-config/default`, shared with the pi CLI.
 
 ### SSE reconnect on page refresh mid-stream
 On `ChatWindow` mount, `GET /api/agent/[id]` is called. If `state.isStreaming === true`, SSE is reconnected automatically. `thinkingLevel` and `isCompacting` are also synced from this response.
 
-### Compaction SSE events
-Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `auto_compaction_start` / `auto_compaction_end`. `handleAgentEvent` accepts both sets to keep `isCompacting` in sync. Manual compact is a blocking POST — the button stays disabled until the response returns.
+### Compaction lifecycle
+Events: `compaction_start` / `compaction_end`. A stop can land between aborting the active turn and compaction installing its AbortController; `rpc-manager.ts` retains and reapplies that abort.
 
 ### Running state SSE + reconciliation
 - The sidebar listens to `/api/agent/running/events`, backed by `subscribeRunningSessions()` in `lib/rpc-manager.ts`, so running badges update without polling.
@@ -156,9 +163,15 @@ Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `au
 - Removing a dirty worktree returns `409` with `{ dirty: true }` so the UI can ask before retrying with `force`.
 - Sessions whose cwd points at a removed worktree are inferred back into the main project instead of becoming a phantom project row.
 
+### Project trust and project editing
+- Project extensions / `.agents/skills` are executable repo content; gate via Pi's shared `ProjectTrustStore`. Trust change: reject busy project, invalidate models, destroy project wrappers.
+- Source-folder edit (`/api/projects/rebind`): rewrite matching session `cwd` headers with rollback; then replace allowed root + invalidate session/project caches.
+- Sidebar “Remove project” is client-only hide/forget (`localStorage`); does not delete files or sessions.
+
 ### File access allow-list
-- `/api/files` is intentionally not a general filesystem browser. Allowed roots come from session cwds, their resolved project roots, and roots explicitly added with `allowFileRoot()`.
+- `/api/files` is intentionally not a general filesystem browser. Roots = session cwds/project roots + explicit `allowed-roots.ts` entries; existing-path checks resolve symlinks.
 - `/api/cwd/validate` and `/api/worktrees` call `allowFileRoot()` when they make a new location browsable.
+- Out-of-root file/bash-output reads require an actual reference from the specified session.
 - A projectless first prompt lazily creates the exact fallback path `~/.weclio/default-workspace` (override with `PI_WEB_DEFAULT_CWD`). Never enumerate the home directory to discover it; the resulting session cwd restores access on later runs.
 
 ### Plugins and skills
@@ -168,14 +181,8 @@ Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `au
 - `/api/skills/install` shells through `npx skills add ... --agent pi`; project installs run with the selected cwd.
 
 ### Auth and model config
-- `ModelsConfig` combines models from `~/.pi/agent/models.json` with provider auth status from pi's `AuthStorage`/`ModelRegistry`.
-- OAuth/device-code/manual-code flows are streamed by `GET /api/auth/login/[provider]`; manual code responses POST back with a short-lived token stored in `globalThis.__piLoginCallbacks`.
-- API-key routes store and remove keys through `AuthStorage`. Status endpoints must never return the raw key.
-- The model test route is `app/api/models-config/test/route.ts`; `app/api/models/test/` is not a real route.
-
-### Completion sound
-- `hooks/useAudio.ts` stores the toggle in `localStorage` as `pi-sound-enabled` and reuses one `AudioContext`.
-- Browser autoplay policy means sound must be unlocked from a user gesture; `ChatInput` calls the unlock hook from interactive controls, and `ChatWindow` plays the tone from `onAgentEnd`.
+- `ModelsConfig` combines `~/.pi/agent/models.json` with pi `AuthStorage`/`ModelRegistry`; status APIs must never expose raw keys.
+- Model test route: `app/api/models-config/test/route.ts` — not `app/api/models/test/`.
 
 ### Exported session HTML
 - `/api/sessions/[id]/export` delegates to pi's export helper, then patches recursive tree helpers in the generated HTML to iterative versions so very deep linear sessions do not overflow the browser call stack.
@@ -186,7 +193,7 @@ Location: `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`
 
 ```jsonl
 {"type":"session","version":3,"id":"<uuid>","timestamp":"...","cwd":"/path","parentSession":"/abs/path/to/parent.jsonl"}
-{"type":"model_change","id":"<8hex>","parentId":null,"provider":"zenmux","modelId":"claude-sonnet-4-6","timestamp":"..."}
+{"type":"model_change","id":"<8hex>","parentId":null,"provider":"...","modelId":"...","timestamp":"..."}
 {"type":"message","id":"<8hex>","parentId":"<8hex>","message":{"role":"user","content":"..."}}
 {"type":"message","id":"<8hex>","parentId":"<8hex>","message":{"role":"assistant","content":[...],...}}
 {"type":"message","id":"<8hex>","parentId":"<8hex>","message":{"role":"toolResult","toolCallId":"...","content":[...]}}
@@ -195,14 +202,3 @@ Location: `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`
 ```
 
 `entryIds[]` in `SessionContext` is a parallel array to `messages[]` — maps each displayed message back to its `.jsonl` entry id, used for fork and navigate_tree calls.
-
----
-
-## CSS Variables (`app/globals.css`)
-
-```
---bg --bg-panel --bg-hover --bg-selected --border
---text --text-muted --text-dim
---accent --user-bg --tool-bg
---font-mono
-```
