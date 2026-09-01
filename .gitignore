@@ -43,3 +43,6 @@ next-env.d.ts
 
 # playwright cli debug artifacts
 .playwright-cli/
+
+# pi project-local npm dependencies
+/.pi/npm/
