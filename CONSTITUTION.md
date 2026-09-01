@@ -47,28 +47,11 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
-## Change and Coding Discipline
+## Coding Constraints
 
-### SCOPE & SAFETY (CRITICAL)
-- Ask before broad refactors when intent or behavior could change.
-- Modify ONLY code directly required. Do NOT refactor/rename unrelated code.
-- Stability: Do NOT introduce new dependencies or change config/build tools.
-- Preserve: Do NOT rename existing symbols for style preferences.
-- Tests: Keep tests aligned with intended behavior. Behavior change → update tests. Do not change tests just to pass them. If test intent is unclear or conflicts with code, ask before proceeding.
-
-### SIMPLICITY PROTOCOL
-- Keep diffs focused and purpose-driven; avoid stylistic churn.
-- Prefer existing repository conventions over introducing new patterns.
-- Match existing code style first.
-- No Speculation: Implement current requirements ONLY.
-- Do NOT change code only to satisfy type checkers unless it fixes a real runtime, test, or build issue for this task.
-- Reuse existing utilities before adding new helpers.
-- Structure: Don't extract single-use helpers; extract only when repeated >3 times.
-- Control Flow: Use Guard Clauses (`if err: return`). Prefer shallow nesting (≈2 levels when practical)
-
-### ERROR HANDLING
-- Boundaries: Catch exceptions ONLY at I/O, Network, or API boundaries.
-- Transparency: Never swallow errors.
+- Ask before adding any new dependency. Prefer existing dependencies when practical.
+- Catch exceptions only where they can be meaningfully handled or translated. Never silently swallow unexpected errors.
+- Never alter tests merely to make them pass.
 - Avoid redundant null checks when upstream validation is explicit.
 
 ### LANGUAGE STANDARDS
