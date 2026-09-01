@@ -52,7 +52,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - Ask before adding any new dependency. Prefer existing dependencies when practical.
 - Catch exceptions only where they can be meaningfully handled or translated. Never silently swallow unexpected errors.
 - Never alter tests merely to make them pass.
-- Avoid redundant null checks when upstream validation is explicit.
+- Trust explicit upstream validation. Don't revalidate ruled-out states.
 
 ### LANGUAGE STANDARDS
 - TS/React: Functional components only. No `any`. Strict ESLint compliance.
