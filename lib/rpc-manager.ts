@@ -1,4 +1,4 @@
-import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, Theme } from "@earendil-works/pi-coding-agent";
+import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, getPowerShellConfig, getShellConfig, initTheme, SessionManager, Theme } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
 import { existsSync, realpathSync, writeFileSync } from "fs";
@@ -11,6 +11,7 @@ import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types";
 import type { ExtensionUiRequest, ExtensionUiResponse, ExtensionWidgetItem } from "./types";
 import { createHeadlessCustomUiTui, DEFAULT_CUSTOM_UI_COLUMNS } from "./custom-ui-terminal";
+import { getToolNamesForPreset, isToolPreset, type ShellAvailability, type ToolPreset } from "./tool-presets";
 
 // ============================================================================
 // Types
@@ -61,7 +62,6 @@ type ExtensionBindingOptions = {
   forceEmptySystemPrompt?: boolean;
 };
 
-const CODING_TOOL_NAMES = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 const PROGRESS_UPDATE_INSTRUCTION = "You must always start with an intermediary update before any content in the analysis channel if the task will require calling tools. The user update should acknowledge the request and explain your first step.";
 
 // Extensions require a complete Theme, while the web UI applies its own styling.
@@ -97,13 +97,41 @@ const CUSTOM_UI_KEYBINDINGS = new TuiKeybindingsManager(TUI_KEYBINDINGS);
 function withExtensionTools(session: AgentSessionLike, toolNames: string[]): string[] {
   if (toolNames.length === 0) return [];
 
-  const codingToolNames = new Set(CODING_TOOL_NAMES);
   const extensionToolNames = session
     .getAllTools()
-    .map((t) => t.name)
-    .filter((name) => !codingToolNames.has(name));
+    .filter((tool) => tool.sourceInfo.source !== "builtin")
+    .map((tool) => tool.name);
 
   return [...new Set([...toolNames, ...extensionToolNames])];
+}
+
+function getShellAvailability(): ShellAvailability {
+  if (globalThis.__piShellAvailability) return globalThis.__piShellAvailability;
+
+  const availability: ShellAvailability = { bash: false, powershell: false };
+  let bashError: unknown;
+  let powerShellError: unknown;
+  try {
+    getShellConfig();
+    availability.bash = true;
+  } catch (error) {
+    bashError = error;
+  }
+  try {
+    getPowerShellConfig();
+    availability.powershell = true;
+  } catch (error) {
+    powerShellError = error;
+  }
+  if (!availability.bash && !availability.powershell) {
+    const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
+    console.warn(
+      `[pi-web] No supported shell is available; shell tools are disabled and read/edit/write remain enabled. Bash: ${errorMessage(bashError)}; PowerShell: ${errorMessage(powerShellError)}`,
+    );
+  }
+
+  globalThis.__piShellAvailability = availability;
+  return availability;
 }
 
 // ============================================================================
@@ -133,7 +161,10 @@ export class AgentSessionWrapper {
   private forceShutdownOnIdle = false;
   private _alive = true;
 
-  constructor(public readonly inner: AgentSessionLike) {}
+  constructor(
+    public readonly inner: AgentSessionLike,
+    private readonly shellAvailability: ShellAvailability,
+  ) {}
 
   get sessionId(): string {
     return this.inner.sessionId;
@@ -188,6 +219,21 @@ export class AgentSessionWrapper {
 
   setForceEmptySystemPrompt(force: boolean): void {
     this.forceEmptySystemPrompt = force;
+    this.applyForcedEmptySystemPrompt();
+  }
+
+  setToolPreset(preset: ToolPreset): void {
+    const builtinToolNames = this.inner
+      .getAllTools()
+      .filter((tool) => tool.sourceInfo.source === "builtin")
+      .map((tool) => tool.name);
+    const toolNames = getToolNamesForPreset(preset, this.shellAvailability, builtinToolNames);
+    this.setToolNames(toolNames);
+  }
+
+  setToolNames(toolNames: string[]): void {
+    this.setForceEmptySystemPrompt(toolNames.length === 0);
+    this.inner.setActiveToolsByName(withExtensionTools(this.inner, toolNames));
     this.applyForcedEmptySystemPrompt();
   }
 
@@ -574,6 +620,7 @@ export class AgentSessionWrapper {
           name: t.name,
           description: t.description,
           active: active.has(t.name),
+          source: t.sourceInfo.source,
         }));
       }
 
@@ -607,10 +654,12 @@ export class AgentSessionWrapper {
       }
 
       case "set_tools": {
-        const toolNames = command.toolNames as string[];
-        this.setForceEmptySystemPrompt(toolNames.length === 0);
-        this.inner.setActiveToolsByName(withExtensionTools(this.inner, toolNames));
-        this.applyForcedEmptySystemPrompt();
+        if (command.preset !== undefined) {
+          if (!isToolPreset(command.preset)) throw new Error(`Invalid tool preset: ${String(command.preset)}`);
+          this.setToolPreset(command.preset);
+        } else {
+          this.setToolNames(command.toolNames as string[]);
+        }
         return null;
       }
 
@@ -1087,6 +1136,7 @@ declare global {
   var __piStartLocks: Map<string, Promise<{ session: AgentSessionWrapper; realSessionId: string }>> | undefined;
   var __piStartingSessionCwds: Map<string, number> | undefined;
   var __piRunningListeners: Set<(ids: string[]) => void> | undefined;
+  var __piShellAvailability: ShellAvailability | undefined;
 }
 
 function getRegistry(): Map<string, AgentSessionWrapper> {
@@ -1215,14 +1265,19 @@ export function notifyRunningChange(): void {
 /**
  * Get or create an AgentSession for the given session.
  * For new sessions (sessionFile === ""), pi generates its own id.
- * Pass toolNames to pre-configure active tools (empty array = all tools disabled).
+ * Pass toolNames for an exact active-tool list, or toolPreset for a dynamic preset.
  */
 export async function startRpcSession(
   sessionId: string,
   sessionFile: string,
   cwd: string,
-  toolNames?: string[]
+  toolNames?: string[],
+  toolPreset?: ToolPreset,
 ): Promise<{ session: AgentSessionWrapper; realSessionId: string }> {
+  if (toolPreset !== undefined && !isToolPreset(toolPreset)) {
+    throw new Error(`Invalid tool preset: ${String(toolPreset)}`);
+  }
+
   const registry = getRegistry();
   const locks = getLocks();
 
@@ -1242,19 +1297,11 @@ export async function startRpcSession(
       ? SessionManager.open(sessionFile, undefined)
       : SessionManager.create(cwd, undefined);
 
-    // Determine which tools to pass based on requested toolNames.
-    // Since v0.68.0, session creation expects string[] tool names instead of Tool[] instances.
-    let toolsOption: string[] | undefined;
-    if (toolNames !== undefined) {
-      // toolNames === [] -> "all off" (an empty allow-list disables every tool).
-      // Otherwise DO NOT pass a builtin-only allow-list: passing CODING_TOOL_NAMES
-      // set allowedToolNames to coding builtins only, which filtered every
-      // extension/package-provided tool (e.g. subagents, web access) out of the
-      // tool registry — so they were unavailable in Pi Web sessions even though the
-      // `pi` CLI keeps them. Leaving the allow-list unset lets the SDK register all
-      // tools (and activate extension tools); we narrow the ACTIVE set below.
-      toolsOption = toolNames.length === 0 ? [] : undefined;
-    }
+    // An empty allow-list is needed only when the explicit request is Off.
+    // Non-empty selections leave registration unrestricted so extension tools load;
+    // the active set is narrowed after session creation.
+    const toolsDisabled = toolPreset === "none" || (toolPreset === undefined && toolNames?.length === 0);
+    const toolsOption = toolsDisabled ? [] : undefined;
 
     // Build services first so extension-registered providers are available
     // before the SDK restores the saved model from the session file.
@@ -1269,25 +1316,19 @@ export async function startRpcSession(
       },
       ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
     });
+    const shellAvailability = getShellAvailability();
+
     const { session: inner } = await createAgentSessionFromServices({
       services,
       sessionManager,
       ...(toolsOption !== undefined ? { tools: toolsOption } : {}),
     });
 
-    // If specific tool names were requested (non-empty), set the active tools to the
-    // requested builtin coding tools PLUS all extension/package tools, so installed
-    // extensions stay usable in Pi Web just like in the `pi` CLI.
-    if (toolNames && toolNames.length > 0) {
-      inner.setActiveToolsByName(withExtensionTools(inner, toolNames));
-    }
-
-    const wrapper = new AgentSessionWrapper(inner);
-    // When all tools are disabled, clear the system prompt entirely.
-    // pi's buildSystemPrompt always produces a non-empty prompt even with no tools;
-    // keep this forced after extension resource discovery and reloads as well.
-    if (toolNames?.length === 0) {
-      wrapper.setForceEmptySystemPrompt(true);
+    const wrapper = new AgentSessionWrapper(inner, shellAvailability);
+    if (toolPreset !== undefined) {
+      wrapper.setToolPreset(toolPreset);
+    } else if (toolNames !== undefined) {
+      wrapper.setToolNames(toolNames);
     }
     wrapper.start();
 
@@ -1297,7 +1338,7 @@ export async function startRpcSession(
 
     wrapper.onDestroy(() => registry.delete(realSessionId));
     registry.set(realSessionId, wrapper);
-    wrapper.beginExtensionBinding({ forceEmptySystemPrompt: toolNames?.length === 0 });
+    wrapper.beginExtensionBinding({ forceEmptySystemPrompt: toolsDisabled });
 
     return { session: wrapper, realSessionId };
   })().finally(() => {

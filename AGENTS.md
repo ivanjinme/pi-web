@@ -43,7 +43,7 @@ app/api/
   sessions/[id]/route.ts          GET/PATCH/DELETE session
   sessions/[id]/context/route.ts  GET ?leafId= — context for a specific leaf
   sessions/[id]/export/route.ts   GET exported HTML for a session
-  agent/new/route.ts              POST { cwd, message, toolNames?, provider?, modelId? }
+  agent/new/route.ts              POST { cwd, message, toolPreset?, toolNames?, provider?, modelId? }
   agent/[id]/route.ts             GET state | POST any command
   agent/[id]/events/route.ts      GET SSE stream
   agent/running/events/route.ts   GET SSE stream of currently-running session ids
@@ -76,7 +76,7 @@ lib/
   pi-types.ts          local structural types for pi SDK objects
   rpc-manager.ts      AgentSessionWrapper + registry + startRpcSession
   session-reader.ts   SessionManager wrappers + path cache + buildSessionContext adapter
-  tool-presets.ts     PRESET_NONE/DEFAULT/FULL + getPresetFromTools()
+  tool-presets.ts     dynamic preset generation + getPresetFromTools()
   types.ts            shared TypeScript types
   normalize.ts        normalizeToolCalls() — field name mismatch between file format and our types
   worktree.ts         project/worktree resolution and git worktree operations
@@ -130,8 +130,10 @@ hooks/
 ### ToolCall field normalization
 Pi stores toolCall blocks as `{type:"toolCall", id, name, arguments}` but `ToolCallContent` uses `{toolCallId, toolName, input}`. `normalizeToolCalls()` in `lib/normalize.ts` handles this — called in both `session-reader.ts` (file load) and `ChatWindow.handleAgentEvent()` (streaming).
 
-### New session tool preset
-Tool names are passed at session creation (`POST /api/agent/new` → `toolNames[]`). For existing sessions, the active preset is inferred on mount via `get_tools` → `getPresetFromTools()`. When tools are fully disabled (`toolNames = []`), `rpc-manager.ts` passes an empty tool allow-list and forces `agent.state.systemPrompt = ""` after startup/reload/resource discovery.
+### Tool presets
+- UI requests use `toolPreset`; `toolNames[]` remains an exact list and is never inferred as a preset. Restored sessions without either are left unchanged.
+- Default uses `read + Bash/PowerShell + edit + write`; Full uses Pi runtime built-ins plus extension tools; Off disables everything and clears the system prompt.
+- Shell availability is probed once per process with Pi helpers and cached on `globalThis`. Full filters unavailable shells and discovers built-ins via `sourceInfo.source === "builtin"`.
 
 ### Model defaults for new sessions
 `GET /api/models` returns `defaultModel` read from `~/.pi/agent/settings.json`. `ChatWindow` pre-selects this on mount for new sessions. Picking a model in the dropdown fire-and-forgets `PUT /api/models-config/default`, so the selection is remembered as the global default (also picked up by the pi CLI).
