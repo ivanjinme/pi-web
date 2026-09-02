@@ -1,0 +1,70 @@
+name: Webpack Package Smoke
+
+on:
+  workflow_dispatch:
+
+jobs:
+  package-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build with webpack
+        run: npm run build -- --webpack
+
+      - name: Assert webpack keeps Pi externals unhashed
+        run: |
+          if grep -R -E --include='*.js' '@earendil-works/pi-(coding-agent|agent-core|ai|tui)-[0-9a-f]{16}' .next/server; then
+            echo 'Found hashed Pi external module identifiers in webpack output.' >&2
+            exit 1
+          fi
+
+      - name: Pack and install the tarball in an isolated project
+        run: |
+          npm pack --pack-destination "$RUNNER_TEMP"
+          mkdir "$RUNNER_TEMP/weclio-smoke"
+          cd "$RUNNER_TEMP/weclio-smoke"
+          npm init --yes
+          npm install --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP"/weclio-pi-web-*.tgz
+
+      - name: Start the installed CLI and load Pi routes
+        env:
+          HOME: ${{ runner.temp }}/weclio-home
+        run: |
+          set -euo pipefail
+          SMOKE_DIR="$RUNNER_TEMP/weclio-smoke"
+          PORT=18991
+          mkdir -p "$HOME" "$RUNNER_TEMP/weclio-workspace"
+          cd "$SMOKE_DIR"
+          node node_modules/@weclio/pi-web/bin/pi-web.js --no-open --port "$PORT" > server.log 2>&1 &
+          SERVER_PID=$!
+          cleanup() {
+            kill "$SERVER_PID" 2>/dev/null || true
+            wait "$SERVER_PID" 2>/dev/null || true
+            cat server.log
+          }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error "http://127.0.0.1:$PORT/api/auth/providers" > providers.json; then
+              break
+            fi
+            sleep 1
+          done
+
+          node -e "const { providers } = require('./providers.json'); if (!Array.isArray(providers)) process.exit(1)"
+          payload="$(node -e 'console.log(JSON.stringify({ cwd: process.argv[1], type: "ensure_session" }))' "$RUNNER_TEMP/weclio-workspace")"
+          curl --fail --silent --show-error \
+            --request POST \
+            --header 'content-type: application/json' \
+            --data "$payload" \
+            "http://127.0.0.1:$PORT/api/agent/new" \
+            > session.json
+          node -e "const result = require('./session.json'); if (!result.success || !result.sessionId) process.exit(1)"
