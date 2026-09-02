@@ -17,12 +17,12 @@ jobs:
       - run: npm ci
 
       - name: Build with webpack
-        run: npm run build -- --webpack
+        run: npm run build
 
-      - name: Assert webpack keeps Pi externals unhashed
+      - name: Assert webpack keeps server externals unhashed
         run: |
-          if grep -R -E --include='*.js' '@earendil-works/pi-(coding-agent|agent-core|ai|tui)-[0-9a-f]{16}' .next/server; then
-            echo 'Found hashed Pi external module identifiers in webpack output.' >&2
+          if grep -R -E --include='*.js' '(undici|@earendil-works/pi-(coding-agent|agent-core|ai|tui))-[0-9a-f]{16}' .next/server; then
+            echo 'Found hashed server external module identifiers in webpack output.' >&2
             exit 1
           fi
 
