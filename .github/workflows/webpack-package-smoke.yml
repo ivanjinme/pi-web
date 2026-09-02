@@ -27,7 +27,9 @@ jobs:
           fi
 
       - name: Pack tarball
-        run: npm pack --pack-destination "$RUNNER_TEMP/package-tarball"
+        run: |
+          mkdir -p "$RUNNER_TEMP/package-tarball"
+          npm pack --pack-destination "$RUNNER_TEMP/package-tarball"
 
       - uses: actions/upload-artifact@v4
         with:
