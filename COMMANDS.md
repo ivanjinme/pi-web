@@ -23,5 +23,6 @@ git tag "v$VERSION"
 git push origin main "v$VERSION"
 ```
 
-Source of truth: `.github/workflows/publish.yml`. Never run `npm run release`
-for the normal publish flow.
+Source of truth: `.github/workflows/publish.yml`. Its `npm run build` uses webpack
+(`next build --webpack`) so server externals remain publishable. Never run
+`npm run release` for the normal publish flow.
