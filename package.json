@@ -15,7 +15,7 @@
     "node": ">=22.19.0"
   },
   "bin": {
-    "pi-web": "bin/pi-web.js"
+    "weclio-web": "bin/pi-web.js"
   },
   "files": [
     "bin",

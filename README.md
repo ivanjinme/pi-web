@@ -12,7 +12,7 @@ Requires Node.js 22.19+.
 npx @weclio/pi-web@latest
 # or
 npm install -g @weclio/pi-web
-pi-web
+weclio-web
 ```
 
 Open http://127.0.0.1:8888 (the browser opens automatically).
@@ -29,7 +29,7 @@ Open http://127.0.0.1:8888 (the browser opens automatically).
 ## Options
 
 ```bash
-pi-web --port 8080 -H 0.0.0.0 --no-open
+weclio-web --port 8080 -H 0.0.0.0 --no-open
 ```
 
 | Env / Flag | Purpose |

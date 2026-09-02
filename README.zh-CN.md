@@ -12,7 +12,7 @@
 npx @weclio/pi-web@latest
 # 或
 npm install -g @weclio/pi-web
-pi-web
+weclio-web
 ```
 
 打开 http://127.0.0.1:8888（会自动打开浏览器）。
@@ -29,7 +29,7 @@ pi-web
 ## 选项
 
 ```bash
-pi-web --port 8080 -H 0.0.0.0 --no-open
+weclio-web --port 8080 -H 0.0.0.0 --no-open
 ```
 
 | 环境变量 / 参数 | 作用 |

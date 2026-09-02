@@ -46,7 +46,7 @@ if (!fs.existsSync(nextDir)) {
 
 if (!loopbackHostnames.has(hostname)) {
   console.warn(
-    `Warning: pi-web is listening on ${hostname} without authentication. Only use this on a trusted network.`,
+    `Warning: weclio-web is listening on ${hostname} without authentication. Only use this on a trusted network.`,
   );
 }
 

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
+import { findProviderMissingModelBaseUrl } from "@/lib/models-config-import";
 // Color icons (have their own fill colors — no background needed)
 import AnthropicIcon from "@lobehub/icons/es/Anthropic/components/Mono";
 import OpenAIIcon from "@lobehub/icons/es/OpenAI/components/Mono";
@@ -115,12 +116,15 @@ interface ModelEntry {
   id: string;
   name?: string;
   api?: string;
+  baseUrl?: string;
   reasoning?: boolean;
   thinkingLevelMap?: Record<string, string | null>;
   input?: string[];
   contextWindow?: number;
   maxTokens?: number;
   cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+  samplingParams?: Record<string, unknown>;
+  headers?: Record<string, string>;
   compat?: Record<string, unknown>;
 }
 
@@ -289,14 +293,22 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 // ── Provider detail ───────────────────────────────────────────────────────────
 
-function ProviderDetail({ name, provider, onChange, onRename, onDelete }: {
-  name: string; provider: ProviderEntry;
-  onChange: (p: ProviderEntry) => void; onRename: (n: string) => void; onDelete: () => void;
+function ProviderDetail({ name, provider, managed, onChange, onRename, onSync, onDelete }: {
+  name: string;
+  provider: ProviderEntry;
+  managed?: boolean;
+  onChange: (p: ProviderEntry) => void;
+  onRename?: (n: string) => void;
+  onSync?: () => void;
+  onDelete: () => void;
 }) {
   const { t } = useI18n();
   const [editingName, setEditingName] = useState(name);
   useEffect(() => setEditingName(name), [name]);
   const set = <K extends keyof ProviderEntry>(k: K, v: ProviderEntry[K]) => onChange({ ...provider, [k]: v });
+  const apiOptions = provider.api && !API_OPTIONS.some((api) => api === provider.api)
+    ? [provider.api, ...API_OPTIONS]
+    : API_OPTIONS;
 
   useEffect(() => {
     if (!provider.api) onChange({ ...provider, api: "openai-completions" });
@@ -307,19 +319,33 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete }: {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
          <SectionTitle>{t("i18n.provider")}</SectionTitle>
-        <button onClick={onDelete}
-          style={{ padding: "3px 8px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, color: "#ef4444", cursor: "pointer", fontSize: 11 }}>
-           {t("i18n.delete")}
-        </button>
+        <div style={{ display: "flex", gap: 6 }}>
+          {onSync && (
+            <button onClick={onSync}
+              style={{ padding: "3px 8px", background: "none", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text-muted)", cursor: "pointer", fontSize: 11 }}>
+              Sync
+            </button>
+          )}
+          <button onClick={onDelete}
+            style={{ padding: "3px 8px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, color: "#ef4444", cursor: "pointer", fontSize: 11 }}>
+             {t("i18n.delete")}
+          </button>
+        </div>
       </div>
 
        <Field label={t("i18n.providerName")}>
-        <TextInput value={editingName} onChange={setEditingName} placeholder="provider-name" mono />
-        {editingName !== name && editingName.trim() && (
-          <button onClick={() => onRename(editingName.trim())}
-            style={{ marginTop: 4, padding: "3px 10px", background: "var(--accent)", border: "none", borderRadius: 4, color: "#fff", cursor: "pointer", fontSize: 11, alignSelf: "flex-start" }}>
-             {t("i18n.rename")}
-          </button>
+        {managed ? (
+          <div style={{ ...inputStyle, fontFamily: "var(--font-mono)" }}>{name}</div>
+        ) : (
+          <>
+            <TextInput value={editingName} onChange={setEditingName} placeholder="provider-name" mono />
+            {onRename && editingName !== name && editingName.trim() && (
+              <button onClick={() => onRename(editingName.trim())}
+                style={{ marginTop: 4, padding: "3px 10px", background: "var(--accent)", border: "none", borderRadius: 4, color: "#fff", cursor: "pointer", fontSize: 11, alignSelf: "flex-start" }}>
+                 {t("i18n.rename")}
+              </button>
+            )}
+          </>
         )}
       </Field>
 
@@ -328,16 +354,18 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete }: {
           placeholder="https://api.example.com/v1" mono />
       </Field>
 
-      <Field label="API Key">
-        <SecretTextInput value={provider.apiKey ?? ""} onChange={(v) => set("apiKey", v || undefined)}
-          placeholder="ENV_VAR_NAME, !shell-command, or literal key" mono />
-        <span style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>
-          Prefix with <code style={{ fontFamily: "var(--font-mono)" }}>!</code> to run a shell command, or use an env var name
-        </span>
-      </Field>
+      {!managed && (
+        <Field label="API Key">
+          <SecretTextInput value={provider.apiKey ?? ""} onChange={(v) => set("apiKey", v || undefined)}
+            placeholder="ENV_VAR_NAME, !shell-command, or literal key" mono />
+          <span style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>
+            Prefix with <code style={{ fontFamily: "var(--font-mono)" }}>!</code> to run a shell command, or use an env var name
+          </span>
+        </Field>
+      )}
 
       <Field label="API">
-        <Select value={provider.api ?? "openai-completions"} onChange={(v) => set("api", v)} options={API_OPTIONS} required />
+        <Select value={provider.api ?? "openai-completions"} onChange={(v) => set("api", v)} options={apiOptions} required />
       </Field>
     </div>
   );
@@ -522,6 +550,9 @@ function ModelDetail({
   const [testState, setTestState] = useState<ModelTestState>({ phase: "idle" });
   const { t } = useI18n();
   const set = <K extends keyof ModelEntry>(k: K, v: ModelEntry[K]) => onChange({ ...model, [k]: v });
+  const apiOptions = model.api && !API_OPTIONS.some((api) => api === model.api)
+    ? [model.api, ...API_OPTIONS]
+    : API_OPTIONS;
   const costVal = (k: keyof NonNullable<ModelEntry["cost"]>) => model.cost?.[k] !== undefined ? String(model.cost[k]) : "";
   const setCost = (k: keyof NonNullable<ModelEntry["cost"]>, v: string) => {
     const n = parseFloat(v);
@@ -648,7 +679,7 @@ function ModelDetail({
       </div>
 
       <Field label="API override">
-        <Select value={model.api ?? ""} onChange={(v) => set("api", v || undefined)} options={API_OPTIONS} />
+        <Select value={model.api ?? ""} onChange={(v) => set("api", v || undefined)} options={apiOptions} />
       </Field>
 
       <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
@@ -971,7 +1002,12 @@ function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefre
 
 // ── API Key detail ────────────────────────────────────────────────────────────
 
-function ApiKeyDetail({ provider, onRefresh }: { provider: ApiKeyProvider; onRefresh: () => void }) {
+function ApiKeyDetail({ provider, imported, onImport, onRefresh }: {
+  provider: ApiKeyProvider;
+  imported: boolean;
+  onImport: () => Promise<void>;
+  onRefresh: () => void;
+}) {
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -1001,6 +1037,7 @@ function ApiKeyDetail({ provider, onRefresh }: { provider: ApiKeyProvider; onRef
       if (!res.ok || d.error) {
         setError(d.error ?? `HTTP ${res.status}`);
       } else {
+        if (!imported) await onImport();
         setApiKey("");
         setSavedOk(true);
         setTimeout(() => setSavedOk(false), 2000);
@@ -1011,7 +1048,19 @@ function ApiKeyDetail({ provider, onRefresh }: { provider: ApiKeyProvider; onRef
     } finally {
       setSaving(false);
     }
-  }, [apiKey, provider.id, onRefresh]);
+  }, [apiKey, imported, provider.id, onImport, onRefresh]);
+
+  const handleImport = useCallback(async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await onImport();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [onImport]);
 
   const handleRemove = useCallback(async () => {
     setRemoving(true);
@@ -1082,6 +1131,13 @@ function ApiKeyDetail({ provider, onRefresh }: { provider: ApiKeyProvider; onRef
       </Field>
 
       {error && <p style={{ margin: 0, fontSize: 12, color: "#f87171" }}>{error}</p>}
+
+      {provider.configured && !imported && (
+        <button onClick={handleImport} disabled={saving}
+          style={{ alignSelf: "flex-start", padding: "5px 12px", background: "var(--accent)", border: "none", borderRadius: 5, color: "#fff", cursor: saving ? "not-allowed" : "pointer", fontSize: 12 }}>
+          Pull metadata
+        </button>
+      )}
 
       {provider.configured && (
         <button
@@ -1333,6 +1389,20 @@ export function ModelsConfig() {
     setConfig((prev) => ({ ...prev, providers: { ...(prev.providers ?? {}), [name]: p } }));
   }, []);
 
+  const importProvider = useCallback(async (providerId: string) => {
+    const res = await fetch(`/api/models-config/providers/${encodeURIComponent(providerId)}`);
+    const data = await res.json() as { provider?: ProviderEntry; error?: string };
+    if (!res.ok || !data.provider) throw new Error(data.error ?? `HTTP ${res.status}`);
+    const template = data.provider;
+
+    setConfig((prev) => {
+      const existing = prev.providers?.[providerId];
+      const provider = existing ? { ...template, ...existing, models: template.models } : template;
+      return { ...prev, providers: { ...(prev.providers ?? {}), [providerId]: provider } };
+    });
+    setSelection({ type: "provider", name: providerId });
+  }, []);
+
   const renameProvider = useCallback((oldName: string, newName: string) => {
     setConfig((prev) => {
       const entries = Object.entries(prev.providers ?? {});
@@ -1395,9 +1465,15 @@ export function ModelsConfig() {
   }, []);
 
   const handleSave = useCallback(async () => {
-    setSaving(true);
     setSaveError(null);
     setSavedOk(false);
+    const missingBaseUrlProvider = findProviderMissingModelBaseUrl(config.providers);
+    if (missingBaseUrlProvider) {
+      setSaveError(`Provider ${missingBaseUrlProvider} requires a base URL before saving.`);
+      return;
+    }
+
+    setSaving(true);
     try {
       const res = await fetch("/api/models-config", {
         method: "PUT",
@@ -1416,7 +1492,7 @@ export function ModelsConfig() {
 
   const providers = Object.entries(config.providers ?? {});
   const activeOAuth = oauthProviders.filter((p) => p.loggedIn);
-  const activeApiKey = apiKeyProviders.filter((p) => p.configured);
+  const activeApiKey = apiKeyProviders.filter((p) => p.configured && !config.providers?.[p.id]);
 
   // Resolve current detail
   const detailContent = (() => {
@@ -1429,20 +1505,45 @@ export function ModelsConfig() {
     if (selection.type === "apikey") {
       const p = apiKeyProviders.find((p) => p.id === selection.providerId);
       if (!p) return null;
-      return <ApiKeyDetail key={p.id} provider={p} onRefresh={loadApiKeyProviders} />;
+      return (
+        <ApiKeyDetail
+          key={p.id}
+          provider={p}
+          imported={false}
+          onImport={() => importProvider(p.id)}
+          onRefresh={loadApiKeyProviders}
+        />
+      );
     }
     if (selection.type === "provider") {
       const provider = config.providers?.[selection.name];
       if (!provider) return null;
+      const managed = apiKeyProviders.find((item) => item.id === selection.name);
       return (
-        <ProviderDetail
-          key={selection.name}
-          name={selection.name}
-          provider={provider}
-          onChange={(p) => updateProvider(selection.name, p)}
-          onRename={(n) => renameProvider(selection.name, n)}
-          onDelete={() => deleteProvider(selection.name)}
-        />
+        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+          {managed && (
+            <ApiKeyDetail
+              provider={managed}
+              imported
+              onImport={() => importProvider(managed.id)}
+              onRefresh={loadApiKeyProviders}
+            />
+          )}
+          <ProviderDetail
+            key={selection.name}
+            name={selection.name}
+            provider={provider}
+            managed={Boolean(managed)}
+            onChange={(p) => updateProvider(selection.name, p)}
+            onRename={managed ? undefined : (n) => renameProvider(selection.name, n)}
+            onSync={managed ? () => {
+              if (window.confirm("Sync will replace model metadata with the latest provider catalog. Continue?")) {
+                void importProvider(managed.id).catch((error) => setSaveError(String(error)));
+              }
+            } : undefined}
+            onDelete={() => deleteProvider(selection.name)}
+          />
+        </div>
       );
     }
     const provider = config.providers?.[selection.providerName];
