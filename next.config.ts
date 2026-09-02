@@ -11,7 +11,6 @@ try {
 
 const nextConfig: NextConfig = {
   serverExternalPackages: [
-    "undici",
     "@earendil-works/pi-coding-agent",
     "@earendil-works/pi-agent-core",
     "@earendil-works/pi-ai",
