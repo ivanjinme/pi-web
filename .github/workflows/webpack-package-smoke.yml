@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  package-smoke:
+  build-tarball:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,23 +26,52 @@ jobs:
             exit 1
           fi
 
-      - name: Pack and install the tarball in an isolated project
-        run: |
-          npm pack --pack-destination "$RUNNER_TEMP"
-          mkdir "$RUNNER_TEMP/weclio-smoke"
-          cd "$RUNNER_TEMP/weclio-smoke"
-          npm init --yes
-          npm install --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP"/weclio-pi-web-*.tgz
+      - name: Pack tarball
+        run: npm pack --pack-destination "$RUNNER_TEMP/package-tarball"
 
-      - name: Start the installed CLI and load Pi routes
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-tarball
+          path: ${{ runner.temp }}/package-tarball/*.tgz
+          if-no-files-found: error
+
+  smoke-installed-tarball:
+    needs: build-tarball
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: 22
+          - os: windows-latest
+            node: 26
+          - os: macos-latest
+            node: 26
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: package-tarball
+          path: ${{ runner.temp }}/package-tarball
+
+      - name: Install tarball and load Pi routes
+        shell: bash
         env:
           HOME: ${{ runner.temp }}/weclio-home
         run: |
           set -euo pipefail
           SMOKE_DIR="$RUNNER_TEMP/weclio-smoke"
+          TARBALL="$(find "$RUNNER_TEMP/package-tarball" -name 'weclio-pi-web-*.tgz' -print -quit)"
           PORT=18991
-          mkdir -p "$HOME" "$RUNNER_TEMP/weclio-workspace"
+          test -n "$TARBALL"
+          mkdir -p "$HOME" "$SMOKE_DIR" "$RUNNER_TEMP/weclio-workspace"
           cd "$SMOKE_DIR"
+          npm init --yes
+          npm install --ignore-scripts --no-audit --no-fund "$TARBALL"
           node node_modules/@weclio/pi-web/bin/pi-web.js --no-open --port "$PORT" > server.log 2>&1 &
           SERVER_PID=$!
           cleanup() {
