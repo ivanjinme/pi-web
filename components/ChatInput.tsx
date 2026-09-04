@@ -413,17 +413,38 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     });
   }, []);
 
-  const clearInput = useCallback(() => {
+  const resetInput = useCallback(() => {
     setValue("");
     setAtQuery(null);
     setHistoryMenuOpen(false);
     if (draftKey) clearDraft(draftKey);
     if (draftKeyRef.current && draftKeyRef.current !== draftKey) clearDraft(draftKeyRef.current);
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+  }, [draftKey]);
+
+  const clearInput = useCallback(() => {
+    resetInput();
     clearImages();
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-    }
-  }, [clearImages, draftKey]);
+  }, [clearImages, resetInput]);
+
+  const detachInput = useCallback(() => {
+    resetInput();
+    setAttachedImages([]);
+  }, [resetInput]);
+
+  const restoreInput = useCallback((text: string, images: AttachedImage[]) => {
+    setValue((current) => {
+      if (!current.trim()) return text;
+      if (!text || current.trim() === text) return current;
+      return `${text}\n\n${current}`;
+    });
+    setAttachedImages((current) => {
+      const combined = [...images, ...current];
+      combined.slice(MAX_ATTACHED_IMAGES).forEach(revokeImagePreview);
+      return combined.slice(0, MAX_ATTACHED_IMAGES);
+    });
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, []);
 
   const focusComposer = useCallback(() => {
     const textarea = textareaRef.current;
@@ -486,22 +507,29 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     const msg = value.trim();
     if (!msg && !attachedImages.length) return;
     if (isStreaming || sendSubmitting) return;
+    const submittedImages = attachedImages;
+    let shouldRestore = true;
     onAudioUnlock?.();
     setSendSubmitting(true);
+    detachInput();
     try {
-      if (!attachedImages.length && msg.startsWith("/") && onBuiltinCommand) {
+      if (!submittedImages.length && msg.startsWith("/") && onBuiltinCommand) {
         const result = await onBuiltinCommand(msg);
         if (result.handled) {
-          clearInput();
+          shouldRestore = false;
           return;
         }
       }
-      const accepted = await onSend(msg, attachedImages.length ? attachedImages : undefined);
-      if (accepted !== false) clearInput();
+      const accepted = await onSend(msg, submittedImages.length ? submittedImages : undefined);
+      shouldRestore = accepted === false;
+    } catch {
+      // 错误由提交层展示；这里只负责恢复草稿。
     } finally {
+      if (shouldRestore) restoreInput(msg, submittedImages);
+      else submittedImages.forEach(revokeImagePreview);
       setSendSubmitting(false);
     }
-  }, [value, attachedImages, isStreaming, sendSubmitting, onBuiltinCommand, onSend, clearInput, onAudioUnlock]);
+  }, [value, attachedImages, isStreaming, sendSubmitting, onBuiltinCommand, onSend, detachInput, restoreInput, onAudioUnlock]);
 
   const slashQuery = value.startsWith("/") && !/\s/.test(value.slice(1))
     ? value.slice(1).toLowerCase()
