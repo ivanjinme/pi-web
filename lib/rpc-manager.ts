@@ -64,14 +64,16 @@ type ExtensionBindingOptions = {
 
 const PROGRESS_UPDATE_INSTRUCTION = "You must always start with an intermediary update before any content in the analysis channel if the task will require calling tools. The user update should acknowledge the request and explain your first step.";
 
-// Extensions require a complete Theme, while the web UI applies its own styling.
+// Web UI 不输出终端样式；为上游新增颜色 token 提供空值默认值。
+const PLAIN_TEXT_COLORS = new Proxy({} as Record<string, string>, {
+  get: (colors, key) => typeof key === "string" ? (colors[key] ?? "") : undefined,
+});
+
 class PlainTextTheme extends Theme {
   constructor() {
     super(
-      // Pi 0.84 derives optional search/scrollbar colors from these keys
-      // before our no-op overrides are used.
-      { thinkingXhigh: "", text: "" } as ConstructorParameters<typeof Theme>[0],
-      { selectedBg: "" } as ConstructorParameters<typeof Theme>[1],
+      PLAIN_TEXT_COLORS as ConstructorParameters<typeof Theme>[0],
+      PLAIN_TEXT_COLORS as ConstructorParameters<typeof Theme>[1],
       "truecolor",
     );
   }
