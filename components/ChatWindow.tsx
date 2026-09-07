@@ -497,8 +497,12 @@ export function ChatWindow({ session, newSessionCwd, newTaskDraftId, showProject
             >
               What’s on your mind today?
             </div>
-            <NoticeShelf notices={notices} />
-            {chatInputElement}
+            <div style={{ position: "relative" }}>
+              {chatInputElement}
+              <div style={{ position: "absolute", bottom: "calc(100% - 30px)", left: 24, right: 24, zIndex: 10, pointerEvents: "none" }}>
+                <NoticeShelf notices={notices} compact />
+              </div>
+            </div>
           </div>
         </div>
       ) : (
@@ -834,10 +838,10 @@ function ExtensionWidgets({ widgets }: { widgets: Array<{ key: string; lines: st
   );
 }
 
-function NoticeShelf({ notices }: { notices: NoticeItem[] }) {
+function NoticeShelf({ notices, compact = false }: { notices: NoticeItem[]; compact?: boolean }) {
   if (notices.length === 0) return null;
   return (
-    <div aria-live="polite" style={{ display: "flex", flexDirection: "column", gap: 4, margin: "32px 0 16px" }}>
+    <div aria-live="polite" style={{ display: "flex", flexDirection: "column", alignItems: compact ? "center" : undefined, gap: 4, margin: compact ? "0 0 6px" : "32px 0 16px", textAlign: compact ? "center" : undefined }}>
       {notices.map((notice) => {
         const color = notice.type === "error"
           ? "#dc2626"

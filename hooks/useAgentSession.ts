@@ -128,6 +128,7 @@ const PROMPT_SETTLE_MAX_MS = 20_000;
 const AGENT_STATE_RECONCILE_MS = 15_000;
 const BASH_STATE_RECONCILE_MS = 1_000;
 const EVENT_STREAM_CONNECT_TIMEOUT_MS = 5_000;
+const SUCCESS_NOTICE_DURATION_MS = 3_000;
 type EventStreamConnectionStatus = "connected" | "timeout" | "closed";
 
 type EventStreamConnectionResult = {
@@ -615,12 +616,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const addNotice = useCallback((notice: { id?: string; message: string; type?: NoticeType }) => {
     const message = notice.message.trim();
     if (!message) return;
+    const id = notice.id ?? createNoticeId();
+    const type = notice.type ?? "info";
     setNotices((current) => [...current, {
-      id: notice.id ?? createNoticeId(),
+      id,
       message,
-      type: notice.type ?? "info",
+      type,
       createdAt: Date.now(),
     }]);
+    if (type === "success") {
+      setTimeout(() => {
+        setNotices((current) => current.filter((item) => item.id !== id));
+      }, SUCCESS_NOTICE_DURATION_MS);
+    }
   }, []);
 
   const handleExtensionUiRequest = useCallback((request: ExtensionUiRequest) => {
