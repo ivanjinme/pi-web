@@ -43,6 +43,7 @@ interface Props {
   onAgentEnd?: () => void;
   onSessionCreated?: (session: SessionInfo) => void;
   onSessionForked?: (newSessionId: string) => void;
+  onSessionRenamed?: (name: string) => void;
   modelsRefreshKey?: number;
   chatInputRef?: React.RefObject<ChatInputHandle | null>;
   onBranchDataChange?: (tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => void;
@@ -194,7 +195,7 @@ function ProcessDetailsGroup({ durationMs, toolCallCount, children, t }: { durat
   );
 }
 
-export function ChatWindow({ session, newSessionCwd, newTaskDraftId, showProjectPicker, onProjectSelect, onProjectClear, resolveNewSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onContextUsageChange, onOpenFile, playDoneSound, unlockAudio }: Props) {
+export function ChatWindow({ session, newSessionCwd, newTaskDraftId, showProjectPicker, onProjectSelect, onProjectClear, resolveNewSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, onSessionRenamed, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onContextUsageChange, onOpenFile, playDoneSound, unlockAudio }: Props) {
   const { t } = useI18n();
   const isMinimapHidden = useIsMobile(400);
   const wrappedOnAgentEnd = useCallback(() => {
@@ -220,7 +221,7 @@ export function ChatWindow({ session, newSessionCwd, newTaskDraftId, showProject
     handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands,
   } = useAgentSession({
-    session, newSessionCwd, onAgentEnd: wrappedOnAgentEnd, onSessionCreated, onSessionForked,
+    session, newSessionCwd, onAgentEnd: wrappedOnAgentEnd, onSessionCreated, onSessionForked, onSessionRenamed,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, resolveNewSessionCwd,
   });
   const sessionBusy = agentRunning || bashRunning || isCompacting;

@@ -470,6 +470,11 @@ export function AppShell() {
     setExplorerRefreshKey((k) => k + 1);
   }, []);
 
+  const handleSessionRenamed = useCallback((name: string) => {
+    setSelectedSession((current) => current ? { ...current, name } : current);
+    setRefreshKey((key) => key + 1);
+  }, []);
+
   const handleSessionForked = useCallback((newSessionId: string) => {
     setRefreshKey((k) => k + 1);
     setSessionKey((k) => k + 1);
@@ -1357,6 +1362,7 @@ export function AppShell() {
               onAgentEnd={handleAgentEnd}
               onSessionCreated={handleSessionCreated}
               onSessionForked={handleSessionForked}
+              onSessionRenamed={handleSessionRenamed}
               modelsRefreshKey={modelsRefreshKey}
               chatInputRef={chatInputRef}
               onBranchDataChange={handleBranchDataChange}

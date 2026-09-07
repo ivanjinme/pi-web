@@ -113,6 +113,7 @@ export interface UseAgentSessionOptions {
   onAgentEnd?: () => void;
   onSessionCreated?: (session: SessionInfo) => void;
   onSessionForked?: (newSessionId: string) => void;
+  onSessionRenamed?: (name: string) => void;
   modelsRefreshKey?: number;
   chatInputRef?: React.RefObject<ChatInputHandle | null>;
   onBranchDataChange?: (tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => void;
@@ -128,7 +129,7 @@ const PROMPT_SETTLE_MAX_MS = 20_000;
 const AGENT_STATE_RECONCILE_MS = 15_000;
 const BASH_STATE_RECONCILE_MS = 1_000;
 const EVENT_STREAM_CONNECT_TIMEOUT_MS = 5_000;
-const SUCCESS_NOTICE_DURATION_MS = 3_000;
+const RELOAD_SUCCESS_NOTICE_DURATION_MS = 3_000;
 type EventStreamConnectionStatus = "connected" | "timeout" | "closed";
 
 type EventStreamConnectionResult = {
@@ -245,7 +246,7 @@ type SlashCommandsResponse = {
 
 export function useAgentSession(opts: UseAgentSessionOptions) {
   const {
-    session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked,
+    session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, onSessionRenamed,
     modelsRefreshKey, onBranchDataChange, onSystemPromptChange, resolveNewSessionCwd,
   } = opts;
 
@@ -616,19 +617,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const addNotice = useCallback((notice: { id?: string; message: string; type?: NoticeType }) => {
     const message = notice.message.trim();
     if (!message) return;
-    const id = notice.id ?? createNoticeId();
-    const type = notice.type ?? "info";
     setNotices((current) => [...current, {
-      id,
+      id: notice.id ?? createNoticeId(),
       message,
-      type,
+      type: notice.type ?? "info",
       createdAt: Date.now(),
     }]);
-    if (type === "success") {
-      setTimeout(() => {
-        setNotices((current) => current.filter((item) => item.id !== id));
-      }, SUCCESS_NOTICE_DURATION_MS);
-    }
   }, []);
 
   const handleExtensionUiRequest = useCallback((request: ExtensionUiRequest) => {
@@ -1278,7 +1272,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (result.error) {
         addNotice({ type: "error", message: result.error });
       } else {
-        addNotice({ type: "success", message: result.message ?? "Command completed" });
+        const noticeId = createNoticeId();
+        addNotice({ id: noticeId, type: "success", message: result.message ?? "Command completed" });
+        if (commandName === "reload") {
+          setTimeout(() => {
+            setNotices((current) => current.filter((item) => item.id !== noticeId));
+          }, RELOAD_SUCCESS_NOTICE_DURATION_MS);
+        }
       }
       return result;
     };
@@ -1322,6 +1322,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           if (!args) return complete({ handled: true, error: "Usage: /name <name>" });
           await sendAgentCommand(sid, { type: "set_session_name", name: args });
           if (await loadSession(sid)) promoteNewSession();
+          onSessionRenamed?.(args);
           return complete({ handled: true, message: `Session renamed to ${args}` });
         }
 
@@ -1334,7 +1335,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (commandName === "compact" && isCompactionCancellation(e)) return { handled: true };
       return complete({ handled: true, error: e instanceof Error ? e.message : String(e) });
     }
-  }, [addNotice, ensureNewSession, loadModels, loadSession, loadSlashCommands, loadTools, promoteNewSession, updateCompacting]);
+  }, [addNotice, ensureNewSession, loadModels, loadSession, loadSlashCommands, loadTools, onSessionRenamed, promoteNewSession, updateCompacting]);
 
   // Queued (undelivered) messages live in the queue panel only; the chat gets
   // the real user message when pi delivers it (user message_end event). An
