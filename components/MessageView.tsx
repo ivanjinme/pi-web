@@ -4,7 +4,7 @@ import { memo, useState, useRef, useEffect, useMemo, type ComponentProps } from 
 import { MarkdownBody } from "./MarkdownBody";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
-import { parseCompactionSummary } from "@/lib/compaction-summary";
+import { compactionSummaryBody } from "@/lib/compaction-summary";
 import { getTextPhase, getAssistantErrorMessage, isEmptyThinkingBlock } from "@/lib/message-display";
 import { parseUnifiedPatch, type SplitDiffCell } from "@/lib/patch";
 import type {
@@ -1189,12 +1189,13 @@ function PairedResult({ text, isEmpty, isError }: {
 function CompactionMessageView({ message }: { message: CustomMessage }) {
   const { t } = useI18n();
   const summary = getMessageText(message.content);
-  const parsedSummary = useMemo(() => parseCompactionSummary(summary), [summary]);
+  const body = compactionSummaryBody(summary);
   const time = formatTime(message.timestamp);
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <div
+      <details
+        className="compaction-card"
         style={{
           border: "1px solid var(--border)",
           borderRadius: 8,
@@ -1202,69 +1203,35 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
           background: "var(--bg)",
         }}
       >
-        <div
+        <summary
           style={{
             display: "flex",
             alignItems: "center",
             gap: 8,
             padding: "7px 10px",
-            borderBottom: "1px solid var(--border)",
             background: "var(--bg-panel)",
             color: "var(--text-muted)",
+            cursor: "pointer",
+            listStyle: "none",
           }}
         >
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 650 }}>
-            compaction
+            {t("i18n.conversationCompacted")}
           </span>
           {time && <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: 10 }}>{time}</span>}
-        </div>
+        </summary>
 
-        <div style={{ padding: "11px 13px 12px" }}>
-          <div style={{ color: "var(--text)", fontSize: 15, fontWeight: 700, lineHeight: 1.35 }}>
-             {t("i18n.conversationCompacted")}
-          </div>
-          <div style={{ marginTop: 3, marginBottom: 10, color: "var(--text)", fontSize: 14, lineHeight: 1.5 }}>
+        <div style={{ padding: "11px 13px 12px", borderTop: "1px solid var(--border)" }}>
+          <div style={{ marginBottom: 10, color: "var(--text)", fontSize: 14, lineHeight: 1.5 }}>
              {t("i18n.compactionDescription")}
           </div>
-          {parsedSummary.body ? (
-            <MarkdownBody className="markdown-compaction-message">{parsedSummary.body}</MarkdownBody>
+          {body ? (
+            <MarkdownBody className="markdown-compaction-message">{body}</MarkdownBody>
           ) : (
              <span style={{ color: "var(--text-dim)", fontSize: 12 }}>{t("i18n.noSummary")}</span>
           )}
-          <CompactionFileMetadata readFiles={parsedSummary.readFiles} modifiedFiles={parsedSummary.modifiedFiles} />
         </div>
-      </div>
-    </div>
-  );
-}
-
-function CompactionFileMetadata({ readFiles, modifiedFiles }: { readFiles: string[]; modifiedFiles: string[] }) {
-  const { t } = useI18n();
-  const total = readFiles.length + modifiedFiles.length;
-  if (total === 0) return null;
-
-  const parts = [];
-  if (readFiles.length > 0) parts.push(`${readFiles.length} read`);
-  if (modifiedFiles.length > 0) parts.push(`${modifiedFiles.length} modified`);
-
-  return (
-    <details className="compaction-file-details">
-       <summary>{t("i18n.fileContext", { details: parts.join(", ") })}</summary>
-       {modifiedFiles.length > 0 && <CompactionFileList title={t("i18n.modifiedFiles")} files={modifiedFiles} />}
-       {readFiles.length > 0 && <CompactionFileList title={t("i18n.readFiles")} files={readFiles} />}
-    </details>
-  );
-}
-
-function CompactionFileList({ title, files }: { title: string; files: string[] }) {
-  return (
-    <div className="compaction-file-section">
-      <div className="compaction-file-title">{title}</div>
-      <ul className="compaction-file-list">
-        {files.map((file) => (
-          <li key={file}>{file}</li>
-        ))}
-      </ul>
+      </details>
     </div>
   );
 }
