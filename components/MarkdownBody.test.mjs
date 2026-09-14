@@ -42,6 +42,20 @@ test("keeps local file markdown links in the app", () => {
   assert.doesNotMatch(html, /target=|rel=|\snode=/);
 });
 
+test("keeps Windows absolute file links in the app", () => {
+  const html = renderMarkdown("[file](D:/work/project/HANDOFF.md)");
+
+  assert.match(html, /<a href="file:\/\/\/D:\/work\/project\/HANDOFF\.md">file<\/a>/);
+  assert.doesNotMatch(html, /target=|rel=|\snode=/);
+});
+
+test("keeps file URLs in the app", () => {
+  const html = renderMarkdown("[file](file:///D:/work/project/HANDOFF.md)");
+
+  assert.match(html, /<a href="file:\/\/\/D:\/work\/project\/HANDOFF\.md">file<\/a>/);
+  assert.doesNotMatch(html, /target=|rel=|\snode=/);
+});
+
 test("renders unknown XML tags as code instead of hiding them", () => {
   const html = renderMarkdown("before <request>value</request> after");
 

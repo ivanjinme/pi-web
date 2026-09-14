@@ -1,15 +1,20 @@
-import type { Options as ReactMarkdownOptions } from "react-markdown";
+import { defaultUrlTransform, type Options as ReactMarkdownOptions } from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
+import { resolveLocalFileHref } from "./file-links";
 
 const markdownSanitizeSchema = {
   ...defaultSchema,
   attributes: {
     ...defaultSchema.attributes,
     code: [["className", /^language-./, "math-inline", "math-display"]],
+  },
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href ?? []), "file"],
   },
   strip: [...(defaultSchema.strip || []), "iframe", "object", "style", "form"],
 };
@@ -21,7 +26,18 @@ interface MarkdownAstNode {
   type: string;
   value?: string;
   lang?: string;
+  url?: string;
   children?: MarkdownAstNode[];
+}
+
+/** 在不放宽其他 URL 协议的前提下保留 Windows 绝对路径。 */
+function remarkNormalizeWindowsFileLinks() {
+  return (tree: MarkdownAstNode) => {
+    visitMarkdownNodes(tree, (node) => {
+      if (node.type !== "link" || !node.url || !/^[A-Za-z]:[\\/]/.test(node.url)) return;
+      node.url = `file:///${node.url.replace(/\\/g, "/")}`;
+    });
+  };
 }
 
 /** Render custom XML-like tags as code instead of letting HTML sanitization hide them. */
@@ -200,14 +216,20 @@ function normalizeInlineLatexMath(line: string): string {
   );
 }
 
+export function markdownUrlTransform(value: string): string {
+  return resolveLocalFileHref(value) ? value : defaultUrlTransform(value);
+}
+
 export const markdownRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [
   remarkGfm,
   remarkMath,
+  remarkNormalizeWindowsFileLinks,
   remarkPreserveUnknownXmlTags,
 ];
 export const markdownPreviewRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [
   remarkGfm,
   remarkMath,
+  remarkNormalizeWindowsFileLinks,
   remarkPreserveUnknownXmlTags,
 ];
 
