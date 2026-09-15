@@ -6,6 +6,7 @@ import { resolveLocalFileHref } from "@/lib/file-links";
 import { encodeFilePathForApi } from "@/lib/file-paths";
 import { markdownRehypePlugins, markdownRemarkPlugins, markdownUrlTransform, normalizeDisplayMath } from "@/lib/markdown";
 import { MermaidBlock, CodeBlock } from "./MermaidBlock";
+import type { Citation } from "@/lib/types";
 
 interface MarkdownBodyProps {
   children: string;
@@ -13,10 +14,20 @@ interface MarkdownBodyProps {
   isStreaming?: boolean;
   cwd?: string;
   onOpenFile?: (filePath: string) => void;
+  citations?: Citation[];
 }
 
-export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile }: MarkdownBodyProps) {
-  const normalizedMarkdown = useMemo(() => normalizeDisplayMath(children), [children]);
+export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile, citations }: MarkdownBodyProps) {
+  const normalizedMarkdown = useMemo(() => normalizeDisplayMath(stripCitationTokens(children)), [children]);
+  const safeCitations = useMemo(() => {
+    const seen = new Set<string>();
+    return (citations ?? []).flatMap((citation) => {
+      const href = markdownUrlTransform(citation.url);
+      if (!href || seen.has(href)) return [];
+      seen.add(href);
+      return [{ ...citation, href }];
+    });
+  }, [citations]);
   const components = useMemo<Components>(() => ({
     code({ className, children, ...props }) {
       // `node` is react-markdown metadata, not a DOM attribute.
@@ -96,6 +107,19 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
       >
         {normalizedMarkdown}
       </ReactMarkdown>
+      {safeCitations.length > 0 && (
+        <div className="markdown-citations">
+          {safeCitations.map((citation, index) => (
+            <a key={citation.href} href={citation.href} target="_blank" rel="noopener noreferrer">
+              [{index + 1}] {citation.title || citation.href}
+            </a>
+          ))}
+        </div>
+      )}
     </div>
   );
+}
+
+function stripCitationTokens(markdown: string): string {
+  return markdown.replace(/cite[^]+/g, "");
 }

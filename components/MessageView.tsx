@@ -723,7 +723,7 @@ function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCal
 function TextBlock({ block, isStreaming, cwd, onOpenFile }: { block: TextContent; isStreaming?: boolean; cwd?: string; onOpenFile?: (filePath: string) => void }) {
   const className = getTextPhase(block) === "commentary" ? "markdown-commentary" : undefined;
   return (
-    <SafeMarkdownBody className={className} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>
+    <SafeMarkdownBody className={className} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} citations={block.citations}>
       {block.text}
     </SafeMarkdownBody>
   );

@@ -24,6 +24,7 @@
     "!.next/dev",
     "!.next/**/*.js.map",
     "public",
+    "scripts",
     "next.config.ts",
     "package.json"
   ],
@@ -34,13 +35,14 @@
     "start": "next start -H 127.0.0.1 -p 8888",
     "start:lan": "next start -H 0.0.0.0 -p 8888",
     "lint": "eslint .",
+    "postinstall": "node scripts/apply-pi-citation-patch.cjs",
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.85.1",
-    "@earendil-works/pi-ai": "^0.85.1",
-    "@earendil-works/pi-coding-agent": "^0.85.1",
-    "@earendil-works/pi-tui": "^0.85.1",
+    "@earendil-works/pi-agent-core": "0.85.1",
+    "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-tui": "0.85.1",
     "next": "16.3.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

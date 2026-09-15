@@ -12,7 +12,7 @@ const { MarkdownBody } = await jiti.import("./MarkdownBody.tsx");
 const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 const { normalizeDisplayMath } = await jiti.import("../lib/markdown.ts");
 
-function renderMarkdown(markdown) {
+function renderMarkdown(markdown, citations) {
   return renderToStaticMarkup(
     React.createElement(
       I18nProvider,
@@ -20,10 +20,22 @@ function renderMarkdown(markdown) {
       React.createElement(MarkdownBody, {
         cwd: "/home/me/project",
         onOpenFile() {},
+        citations,
       }, markdown),
     ),
   );
 }
+
+test("removes raw citation tokens and renders provider citation URLs", () => {
+  const html = renderMarkdown("Claim. citeturn0search4", [{
+    type: "url_citation",
+    url: "https://example.com/source",
+    title: "Source",
+  }]);
+
+  assert.doesNotMatch(html, /turn0search4/);
+  assert.match(html, /<a href="https:\/\/example\.com\/source" target="_blank" rel="noopener noreferrer">\[1\] Source<\/a>/);
+});
 
 test("opens non-file markdown links in a safe new tab", () => {
   const html = renderMarkdown("[docs](https://example.com/docs)");

@@ -16,11 +16,21 @@ export interface SessionEntryBase {
   timestamp: string;
 }
 
+export interface Citation {
+  type: "url_citation";
+  url: string;
+  title?: string;
+  startIndex?: number;
+  endIndex?: number;
+}
+
 export interface TextContent {
   type: "text";
   text: string;
   /** Provider metadata used to distinguish progress commentary from the final answer. */
   textSignature?: string;
+  /** URLs cited by the provider for this text block. */
+  citations?: Citation[];
 }
 
 export interface ImageContent {
