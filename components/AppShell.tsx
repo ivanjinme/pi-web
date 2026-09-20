@@ -350,8 +350,12 @@ export function AppShell() {
 
   const handleCwdChange = useCallback((cwd: string | null, projectRoot?: string | null) => {
     setActiveCwd(cwd);
-    // Skip if cwd is null (initial mount).
-    if (!cwd) return;
+    if (!cwd) {
+      activeProjectRootRef.current = null;
+      setFileTabs([]);
+      setActiveFileTabId(null);
+      return;
+    }
     const newProject = projectRoot ?? cwd;
     const currentProject = activeProjectRootRef.current
       ?? (selectedSession ? (selectedSession.projectRoot ?? selectedSession.cwd) : null);
@@ -390,10 +394,17 @@ export function AppShell() {
   }, [router, selectedSession]);
 
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
+    const nextProject = session.projectRoot ?? session.cwd;
+    const currentProject = activeProjectRootRef.current;
+    if (currentProject && currentProject !== nextProject) {
+      setFileTabs([]);
+      setActiveFileTabId(null);
+    }
+
     // The sidebar updates its cwd after this click. Make that follow-up update
     // recognize the newly selected session's project instead of clearing it as
     // though the user had merely switched projects.
-    activeProjectRootRef.current = session.projectRoot ?? session.cwd;
+    activeProjectRootRef.current = nextProject;
     setNewTaskDraftId(null);
     setNewTaskShowsProjectPicker(false);
     setNewSessionCwd(null);
@@ -628,6 +639,11 @@ export function AppShell() {
   }, [selectedSession]);
 
   const handleDraftProjectSelect = useCallback((cwd: string) => {
+    const currentProject = activeProjectRootRef.current;
+    if (currentProject && currentProject !== cwd) {
+      setFileTabs([]);
+      setActiveFileTabId(null);
+    }
     activeProjectRootRef.current = cwd;
     setActiveCwd(cwd);
     setNewSessionCwd(cwd);
@@ -639,6 +655,8 @@ export function AppShell() {
     activeProjectRootRef.current = null;
     setActiveCwd(null);
     setNewSessionCwd(null);
+    setFileTabs([]);
+    setActiveFileTabId(null);
   }, []);
 
   const resolveDefaultWorkspace = useCallback(async (): Promise<string> => {
@@ -1445,7 +1463,7 @@ export function AppShell() {
         </div>
 
         <div ref={rightWorkspaceRef} className="right-workspace-body">
-          {rightPanelOpen && activeCwd ? (
+          {activeCwd ? (
             <>
               <section
                 className={`right-explorer-pane${rightExplorerResizing ? " is-resizing" : ""}`}
@@ -1474,21 +1492,19 @@ export function AppShell() {
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m17 8-5-5-5 5M12 3v12" /></svg>
                   </button>
                 </div>
-                {!rightExplorerCollapsed && (
-                  <div className="right-explorer-tree">
-                    <FileExplorer
-                      ref={rightExplorerRef}
-                      cwd={activeCwd}
-                      onOpenFile={handleOpenFile}
-                      refreshKey={explorerRefreshKey}
-                      onAtMention={handleAtMention}
-                      onAtMentions={handleAtMentions}
-                      onUploadBusyChange={setRightExplorerUploadBusy}
-                      changesCollapsed={rightChangesCollapsed}
-                      onChangesCountChange={setRightChangesCount}
-                    />
-                  </div>
-                )}
+                <div className="right-explorer-tree" hidden={rightExplorerCollapsed}>
+                  <FileExplorer
+                    ref={rightExplorerRef}
+                    cwd={activeCwd}
+                    onOpenFile={handleOpenFile}
+                    refreshKey={explorerRefreshKey}
+                    onAtMention={handleAtMention}
+                    onAtMentions={handleAtMentions}
+                    onUploadBusyChange={setRightExplorerUploadBusy}
+                    changesCollapsed={rightChangesCollapsed}
+                    onChangesCountChange={setRightChangesCount}
+                  />
+                </div>
               </section>
 
               {!rightExplorerCollapsed && (
