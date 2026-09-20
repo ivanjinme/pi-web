@@ -1502,6 +1502,7 @@ export function AppShell() {
                     onAtMentions={handleAtMentions}
                     onUploadBusyChange={setRightExplorerUploadBusy}
                     changesCollapsed={rightChangesCollapsed}
+                    selectedFilePath={activeFileTab?.filePath}
                     onChangesCountChange={setRightChangesCount}
                   />
                 </div>

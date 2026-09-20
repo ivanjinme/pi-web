@@ -38,6 +38,7 @@ interface Props {
   onAtMentions?: (relativePaths: string[]) => void;
   onUploadBusyChange?: (busy: boolean) => void;
   changesCollapsed: boolean;
+  selectedFilePath?: string | null;
   onChangesCountChange?: (count: number) => void;
 }
 
@@ -219,6 +220,7 @@ function TreeNode({
   onToggleExpanded,
   refreshToken,
   highlightedPaths,
+  selectedFilePath,
   gitStatusByPath,
   changedDirectoryPaths,
   t,
@@ -232,6 +234,7 @@ function TreeNode({
   onToggleExpanded: (fullPath: string, open: boolean) => void;
   refreshToken: string;
   highlightedPaths: Set<string>;
+  selectedFilePath?: string | null;
   gitStatusByPath: Map<string, GitFileStatus>;
   changedDirectoryPaths: Set<string>;
   t: Translate;
@@ -239,6 +242,7 @@ function TreeNode({
   const open = expandedPaths.has(node.fullPath);
   const highlighted = highlightedPaths.has(node.fullPath);
   const normalizedPath = normalizeFilePathSlashes(node.fullPath);
+  const selected = !node.isDir && normalizedPath === selectedFilePath;
   const gitStatus = gitStatusByPath.get(normalizedPath);
   const containsGitChanges = node.isDir && (
     gitStatus !== undefined || changedDirectoryPaths.has(normalizedPath)
@@ -295,7 +299,7 @@ function TreeNode({
           paddingRight: 8,
           height: 24,
           cursor: "pointer",
-          background: hovered ? "var(--bg-hover)" : "transparent",
+          background: selected || hovered ? "var(--bg-hover)" : "transparent",
           borderRadius: 4,
           userSelect: "none",
         }}
@@ -374,8 +378,8 @@ function TreeNode({
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              gap: 4,
-              padding: "0 8px",
+              padding: 0,
+              width: 20,
               height: 20,
               background: "var(--bg-panel)",
               border: "1px solid var(--border)",
@@ -388,7 +392,6 @@ function TreeNode({
             }}
           >
             <MentionIcon />
-            {t("files.mention")}
           </button>
         )}
         {hovered && !node.isDir && (
@@ -441,6 +444,7 @@ function TreeNode({
               onToggleExpanded={onToggleExpanded}
               refreshToken={refreshToken}
               highlightedPaths={highlightedPaths}
+              selectedFilePath={selectedFilePath}
               gitStatusByPath={gitStatusByPath}
               changedDirectoryPaths={changedDirectoryPaths}
               t={t}
@@ -465,14 +469,17 @@ function ChangeRow({
   status,
   cwd,
   onOpenFile,
+  selectedFilePath,
   t,
 }: {
   status: GitFileStatus;
   cwd: string;
   onOpenFile: OpenFileHandler;
+  selectedFilePath?: string | null;
   t: Translate;
 }) {
   const [hovered, setHovered] = useState(false);
+  const selected = normalizeFilePathSlashes(status.filePath) === selectedFilePath;
   const name = getFileName(status.filePath);
   const rel = getRelativeFilePath(status.filePath, cwd);
   return (
@@ -489,7 +496,7 @@ function ChangeRow({
         paddingRight: 8,
         height: 24,
         cursor: "pointer",
-        background: hovered ? "var(--bg-hover)" : "transparent",
+        background: selected || hovered ? "var(--bg-hover)" : "transparent",
         borderRadius: 4,
         userSelect: "none",
       }}
@@ -522,6 +529,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   onAtMentions,
   onUploadBusyChange,
   changesCollapsed,
+  selectedFilePath,
   onChangesCountChange,
 }, ref) {
   const { t } = useI18n();
@@ -541,6 +549,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const prevCwdRef = useRef<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const refreshToken = `${refreshKey ?? 0}:${treeRefreshKey}`;
+  const normalizedSelectedFilePath = selectedFilePath ? normalizeFilePathSlashes(selectedFilePath) : null;
   const uploadBusy = uploadPhase !== "idle";
 
   const gitStatusByPath = useMemo(() => new Map(
@@ -824,10 +833,9 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                   onClick={addUploadedFilesToChat}
                   title={uploadSummary.uploaded.length === 1 ? t("files.addUploadedFile") : t("files.addAllUploadedFiles")}
                   aria-label={uploadSummary.uploaded.length === 1 ? t("files.addUploadedFile") : t("files.addAllUploadedFiles")}
-                  style={{ height: 22, padding: "0 7px", display: "flex", alignItems: "center", justifyContent: "center", gap: 4, flexShrink: 0, border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-panel)", color: "var(--accent)", cursor: "pointer", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}
+                  style={{ width: 22, height: 22, padding: 0, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-panel)", color: "var(--accent)", cursor: "pointer" }}
                 >
                   <MentionIcon />
-                  {t("files.mention")}
                 </button>
               )}
               <DismissButton onClick={() => setUploadSummary(null)} title={t("files.dismissUploadResults")} />
@@ -864,7 +872,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
             <span style={{ color: GIT_STATUS_COLORS.deleted, fontFamily: "var(--font-mono)" }}>-{gitLineStats.deletions}</span>
           </div>
           {gitFiles.map((status) => (
-            <ChangeRow key={status.filePath} status={status} cwd={cwd} onOpenFile={onOpenFile} t={t} />
+            <ChangeRow key={status.filePath} status={status} cwd={cwd} onOpenFile={onOpenFile} selectedFilePath={normalizedSelectedFilePath} t={t} />
           ))}
         </div>
       )}
@@ -888,6 +896,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                 onToggleExpanded={handleToggleExpanded}
                 refreshToken={refreshToken}
                 highlightedPaths={highlightedPaths}
+                selectedFilePath={normalizedSelectedFilePath}
                 gitStatusByPath={gitStatusByPath}
                 changedDirectoryPaths={changedDirectoryPaths}
                 t={t}

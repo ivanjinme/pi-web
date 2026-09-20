@@ -20,7 +20,7 @@ test("closing the right panel or collapsing Explorer keeps the file tree mounted
   assert.match(source, /\{activeCwd \? \(\s*<>\s*<section/);
   assert.doesNotMatch(source, /\{rightPanelOpen && activeCwd \? \(/);
   assert.match(explorerSource, /<div className="right-explorer-tree" hidden=\{rightExplorerCollapsed\}>/);
-  assert.match(explorerSource, /<FileExplorer[\s\S]*?onChangesCountChange=\{setRightChangesCount\}/);
+  assert.match(explorerSource, /<FileExplorer[\s\S]*?selectedFilePath=\{activeFileTab\?\.filePath\}[\s\S]*?onChangesCountChange=\{setRightChangesCount\}/);
   assert.doesNotMatch(explorerSource, /\{!rightExplorerCollapsed && \(\s*<div className="right-explorer-tree"/);
 });
 
