@@ -1508,7 +1508,7 @@ span.linenumber {
   }
   .sidebar-container.sidebar-open {
     width: var(--saved-sidebar-width, 300px);
-    min-width: 240px;
+    min-width: 256px;
   }
   .sidebar-container.sidebar-open.is-resizing {
     min-width: 0;
@@ -2166,9 +2166,10 @@ span.linenumber {
 
 .sidebar-user-menu {
   position: absolute;
-  right: 8px;
   bottom: calc(100% - 3px);
   left: 8px;
+  width: 240px;
+  max-width: calc(100vw - 16px);
   z-index: 20;
   padding: 5px;
   border: 1px solid var(--border);
@@ -2210,6 +2211,64 @@ span.linenumber {
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.codex-usage-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.codex-usage-chevron {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.codex-usage-panel button[aria-expanded="true"] .codex-usage-chevron {
+  transform: rotate(90deg);
+}
+
+.codex-usage-details {
+  margin-top: -2px;
+  padding: 0 9px 6px 39px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.codex-usage-window {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 6px;
+  row-gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.codex-usage-progress {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 2px;
+  height: 4px;
+  margin-bottom: 4px;
+}
+
+.codex-usage-progress > span {
+  background: var(--border);
+}
+
+.codex-usage-progress > span[data-filled="true"] {
+  background: var(--text-muted);
+}
+
+.codex-usage-percent,
+.codex-usage-window time,
+.codex-usage-reset {
+  text-align: right;
+  white-space: nowrap;
 }
 
 .sidebar-user-menu-separator {

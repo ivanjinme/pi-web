@@ -9,6 +9,8 @@ import { FileViewer } from "./FileViewer";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { TabBar, type Tab } from "./TabBar";
 import { SettingsModal } from "./SettingsModal";
+import { CodexUsagePanel } from "./CodexUsagePanel";
+import { useCodexUsage } from "@/hooks/useCodexUsage";
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator } from "./BranchNavigator";
 import { useI18n } from "@/hooks/useI18n";
@@ -35,7 +37,7 @@ interface SettingsContext {
 
 const TOP_BAR_ICON_BUTTON_SIZE = 36;
 const SIDEBAR_DEFAULT_WIDTH = 300;
-const SIDEBAR_MIN_WIDTH = 240;
+const SIDEBAR_MIN_WIDTH = 256;
 const SIDEBAR_MAX_WIDTH = 480;
 const SIDEBAR_COLLAPSE_THRESHOLD = 180;
 const SIDEBAR_WIDTH_STORAGE_KEY = "pi-web:sidebar-width";
@@ -69,6 +71,7 @@ export function AppShell() {
   const [settingsContext, setSettingsContext] = useState<SettingsContext | null>(null);
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const codexUsage = useCodexUsage(userMenuOpen);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const [projectTrust, setProjectTrust] = useState<ProjectTrustStatus | null>(null);
   const [projectTrustDialogOpen, setProjectTrustDialogOpen] = useState(false);
@@ -766,6 +769,7 @@ export function AppShell() {
       <div className="sidebar-user" ref={userMenuRef}>
         {userMenuOpen && (
           <div className="sidebar-user-menu" role="menu">
+            <CodexUsagePanel usage={codexUsage} />
             <button type="button" role="menuitem" onClick={openSettings}>
               <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" /></svg>
               {translate("settings.title")}
