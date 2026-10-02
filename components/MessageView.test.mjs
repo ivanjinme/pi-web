@@ -17,6 +17,15 @@ function renderMessage(message) {
   );
 }
 
+test("does not render system instructions as user or assistant chat bubbles", () => {
+  assert.equal(renderMessage({
+    role: "system",
+    content: "Internal instructions",
+    sections: { rules: "Project rules" },
+    toolsAdded: [{ name: "read", description: "Read files", parameters: { type: "object" } }],
+  }), "");
+});
+
 const largeText = `<strong>${"x".repeat(100_000)}</strong>`;
 
 for (const [name, message] of [

@@ -59,6 +59,15 @@ export interface ToolCallContent {
 
 export type AssistantContentBlock = TextContent | ImageContent | ThinkingContent | ToolCallContent;
 
+export interface SystemMessage {
+  role: "system";
+  content: string | TextContent[];
+  sections?: Record<string, string | null>;
+  toolsAdded?: { name: string; description: string; parameters: Record<string, unknown> }[];
+  toolsRemoved?: { name: string }[];
+  timestamp?: number;
+}
+
 export interface UserMessage {
   role: "user";
   content: string | (TextContent | ImageContent)[];
@@ -119,7 +128,7 @@ export interface BashExecutionMessage {
   timestamp?: number;
 }
 
-export type AgentMessage = UserMessage | AssistantMessage | ToolResultMessage | CustomMessage | BashExecutionMessage;
+export type AgentMessage = SystemMessage | UserMessage | AssistantMessage | ToolResultMessage | CustomMessage | BashExecutionMessage;
 
 export type ExtensionUiRequest =
   | {

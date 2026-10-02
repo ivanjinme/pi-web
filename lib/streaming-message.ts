@@ -4,6 +4,7 @@ import type {
   AgentMessage,
   AssistantContentBlock,
   AssistantMessage,
+  UserMessage,
 } from "./types";
 
 export type ClientAssistantMessageEvent =
@@ -24,6 +25,17 @@ export const INITIAL_STREAMING_STATE: StreamingState = {
   isStreaming: false,
   streamingMessage: null,
 };
+
+export function reconcileUserMessage(
+  messages: AgentMessage[],
+  optimistic: UserMessage | null,
+  delivered: UserMessage,
+): AgentMessage[] {
+  // 用本次本地气泡的对象身份确认，系统更新和同文队列消息都不影响匹配。
+  const index = optimistic ? messages.indexOf(optimistic) : -1;
+  if (index === -1) return [...messages, delivered];
+  return messages.map((message, i) => i === index ? delivered : message);
+}
 
 function updateContentBlock(
   state: StreamingState,

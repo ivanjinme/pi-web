@@ -139,6 +139,8 @@ function haveSameRelevantToolResults(
 }
 
 export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, entryId, onFork, forking, onEditFromHere, showTimestamp, showActions = true, prevTimestamp, sessionId, runningToolLabel, runningToolCallIds }: Props) {
+  // 系统提示词和工具配置保留在会话记录中，不显示为聊天气泡。
+  if (message.role === "system") return null;
   if (message.role === "user") {
     return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onEditFromHere={onEditFromHere} />;
   }

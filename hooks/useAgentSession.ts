@@ -8,6 +8,7 @@ import type {
   ExtensionWidgetItem,
   SessionInfo,
   SessionTreeNode,
+  UserMessage,
 } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
 import { sendAgentCommand } from "@/lib/agent-client";
@@ -15,6 +16,7 @@ import type { ToolEntry } from "@/lib/tool-presets";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import {
   INITIAL_STREAMING_STATE,
+  reconcileUserMessage,
   streamReducer,
   type ClientAssistantMessageEvent,
 } from "@/lib/streaming-message";
@@ -163,52 +165,6 @@ function isCompactionCancellation(error: unknown): boolean {
     || (error instanceof Error && error.name === "AbortError");
 }
 
-function extractMessageText(message: Partial<AgentMessage>): string {
-  const content = (message as { content?: unknown }).content;
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((block) =>
-      block && typeof block === "object"
-        && (block as { type?: string }).type === "text"
-        && typeof (block as { text?: unknown }).text === "string"
-        ? (block as { text: string }).text
-        : "")
-    .filter(Boolean)
-    .join("\n");
-}
-
-function imageSignature(block: unknown): string {
-  if (!block || typeof block !== "object" || (block as { type?: unknown }).type !== "image") return "";
-  const source = (block as { source?: unknown }).source;
-  if (source && typeof source === "object") {
-    const src = source as { type?: unknown; media_type?: unknown; data?: unknown; url?: unknown };
-    return [
-      src.type === "url" ? "url" : "base64",
-      typeof src.media_type === "string" ? src.media_type : "",
-      typeof src.data === "string" ? src.data : "",
-      typeof src.url === "string" ? src.url : "",
-    ].join(":");
-  }
-  const flat = block as { data?: unknown; mimeType?: unknown };
-  return [
-    "base64",
-    typeof flat.mimeType === "string" ? flat.mimeType : "",
-    typeof flat.data === "string" ? flat.data : "",
-    "",
-  ].join(":");
-}
-
-function userMessageKey(message: Partial<AgentMessage>): string {
-  const content = (message as { content?: unknown }).content;
-  if (typeof content === "string") return JSON.stringify({ text: content, images: [] });
-  if (!Array.isArray(content)) return JSON.stringify({ text: "", images: [] });
-  return JSON.stringify({
-    text: extractMessageText(message),
-    images: content.map(imageSignature).filter(Boolean),
-  });
-}
-
 function readCompactResult(result: unknown, reason: string): CompactResultInfo | null {
   if (!result || typeof result !== "object") return null;
   const r = result as CompactCommandResult;
@@ -305,7 +261,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const resolvedNewSessionCwdRef = useRef<string | null>(newSessionCwd);
   const newSessionPromotedRef = useRef(false);
   const promptRunIdRef = useRef(0);
-  const optimisticUserMessageKeyRef = useRef<string | null>(null);
+  const optimisticUserMessageRef = useRef<UserMessage | null>(null);
   const compactingRef = useRef(false);
 
   // Keep the resolved cwd in a ref without writing during render. Unconditional:
@@ -684,7 +640,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (sid) await loadSession(sid);
     } finally {
       if (runId !== undefined && promptRunIdRef.current !== runId) return;
-      optimisticUserMessageKeyRef.current = null;
+      optimisticUserMessageRef.current = null;
       if (!agentRunningRef.current) return;
       agentRunningRef.current = false;
       setAgentRunning(false);
@@ -897,23 +853,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (!agentRunningRef.current) break;
         const completed = event.message as AgentMessage | undefined;
         if (completed && completed.role === "user") {
-          // Delivered steering/follow-up messages surface here as user
-          // messages. The run's initial prompt also emits one, but handleSend
-          // already appended it optimistically. Consume only the still-adjacent
-          // optimistic bubble; later same-text queue deliveries must render.
-          const delivered = normalizeToolCalls(completed);
-          const deliveredKey = userMessageKey(delivered);
-          const optimisticKey = optimisticUserMessageKeyRef.current;
-          optimisticUserMessageKeyRef.current = null;
-          setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (optimisticKey && last?.role === "user" && userMessageKey(last) === optimisticKey) {
-              return optimisticKey === deliveredKey
-                ? prev
-                : [...prev.slice(0, -1), delivered];
-            }
-            return [...prev, delivered];
-          });
+          // 首条用户确认替换本地气泡；标记只消费一次，后续队列投递正常追加。
+          const optimistic = optimisticUserMessageRef.current;
+          optimisticUserMessageRef.current = null;
+          setMessages((prev) => reconcileUserMessage(prev, optimistic, completed));
         } else if (completed) {
           setMessages((prev) => [...prev, normalizeToolCalls(completed)]);
         }
@@ -1004,7 +947,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const promptRunId = promptRunIdRef.current + 1;
 
     const imageBlocks = images?.map((img) => ({ type: "image" as const, source: { type: "base64" as const, media_type: img.mimeType, data: img.data } }));
-    const userMsg: AgentMessage = {
+    const userMsg: UserMessage = {
       role: "user",
       content: imageBlocks?.length
         ? [...(message.trim() ? [{ type: "text" as const, text: message }] : []), ...imageBlocks]
@@ -1012,7 +955,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       timestamp: Date.now(),
     };
     setMessages((prev) => [...prev, userMsg]);
-    optimisticUserMessageKeyRef.current = userMessageKey(userMsg);
+    optimisticUserMessageRef.current = userMsg;
     promptRunIdRef.current = promptRunId;
     agentRunningRef.current = true;
     setAgentRunning(true);
@@ -1060,18 +1003,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (e) {
       console.error("Failed to send message:", e);
       if (e instanceof EventStreamConnectionError) {
-        const optimisticKey = optimisticUserMessageKeyRef.current;
-        if (optimisticKey) {
-          setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            return last?.role === "user" && userMessageKey(last) === optimisticKey
-              ? prev.slice(0, -1)
-              : prev;
-          });
+        const optimistic = optimisticUserMessageRef.current;
+        if (optimistic) {
+          setMessages((prev) => prev.filter((message) => message !== optimistic));
         }
         addNotice({ type: "error", message: e.message });
       }
-      optimisticUserMessageKeyRef.current = null;
+      optimisticUserMessageRef.current = null;
       agentRunningRef.current = false;
       setAgentRunning(false);
       setAgentPhase(null);
