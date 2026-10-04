@@ -5,7 +5,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const PATCHED_PI_AI_VERSION = "0.99.2";
+const PATCHED_PI_AI_VERSION = "1.0.2";
 const packageRoot = path.resolve(__dirname, "..");
 const piAiRoot = findPackageRoot(packageRoot);
 const piAiPackagePath = path.join(piAiRoot, "package.json");
