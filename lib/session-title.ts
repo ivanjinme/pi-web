@@ -208,7 +208,7 @@ export function sanitizeTitleMessages(messages: AgentMessage[]): AgentMessage[] 
   return sanitized;
 }
 
-export async function generateSessionTitle(source: AgentSession): Promise<GeneratedSessionTitle> {
+export async function generateSessionTitle(source: Pick<AgentSession, "agent">): Promise<GeneratedSessionTitle> {
   const sourceAgent = source.agent;
   await sourceAgent.waitForIdle();
 

@@ -5,9 +5,10 @@ import { existsSync, realpathSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { validateAgentImages } from "./image-attachments";
 import { invalidateModelsCache } from "./models-cache";
+import { generateSessionTitle } from "./session-title";
 import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
-import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
+import type { AgentSession, SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types";
 import type { ExtensionUiRequest, ExtensionUiResponse, ExtensionWidgetItem } from "./types";
 import { createHeadlessCustomUiTui, DEFAULT_CUSTOM_UI_COLUMNS } from "./custom-ui-terminal";
@@ -1127,6 +1128,17 @@ export class AgentSessionWrapper {
     const status = getProjectTrustStatus(this.cwd, getAgentDir());
     this.inner.settingsManager.setProjectTrusted(status.trusted);
   }
+}
+
+// 自动命名保留在 facade，HTTP route 不接触 SDK session。
+export async function autoNameRpcSession(session: AgentSessionWrapper) {
+  // 热更新后 globalThis 中可能仍有旧 wrapper，沿用原有 readiness 兼容。
+  await session.waitUntilReady?.();
+  const result = await generateSessionTitle(session.inner as unknown as Pick<AgentSession, "agent">);
+  if (!session.isAlive()) return null;
+  session.inner.setSessionName(result.title);
+  invalidateSessionListCache();
+  return result;
 }
 
 // ============================================================================

@@ -12,7 +12,8 @@ import type {
 } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
 import { sendAgentCommand } from "@/lib/agent-client";
-import type { ToolEntry } from "@/lib/tool-presets";
+import type { CompactCommandResult, QueuedMessages, SlashCommandInfo } from "@/lib/agent/protocol/commands";
+export type { QueuedMessages, SlashCommandInfo } from "@/lib/agent/protocol/commands";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import {
   INITIAL_STREAMING_STATE,
@@ -39,11 +40,6 @@ interface AgentEvent {
   [key: string]: unknown;
 }
 
-interface CompactCommandResult {
-  tokensBefore?: number;
-  estimatedTokensAfter?: number;
-}
-
 type AgentStateResponse = {
   contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null;
   systemPrompt?: string;
@@ -56,11 +52,6 @@ type AgentStateResponse = {
   extensionWidgets?: ExtensionWidgetItem[];
   queuedMessages?: { steering?: string[]; followUp?: string[] } | null;
 };
-
-export interface QueuedMessages {
-  steering: string[];
-  followUp: string[];
-}
 
 function normalizeQueuedMessages(q?: { steering?: string[]; followUp?: string[] } | null): QueuedMessages {
   return { steering: q?.steering ?? [], followUp: q?.followUp ?? [] };
@@ -90,19 +81,6 @@ export interface CompactResultInfo {
 }
 
 const BUILTIN_COMMAND_NAMES = new Set(["compact", "reload", "name"]);
-
-export interface SlashCommandInfo {
-  name: string;
-  description?: string;
-  source: "extension" | "prompt" | "skill";
-  sourceInfo?: {
-    path: string;
-    source: string;
-    scope: "user" | "project" | "temporary";
-    origin: "package" | "top-level";
-    baseDir?: string;
-  };
-}
 
 export type BuiltinSlashCommandResult =
   | { handled: false }
@@ -194,10 +172,6 @@ type ModelsResponse = {
   thinkingLevels?: Record<string, string[]>;
   thinkingLevelMaps?: Record<string, Record<string, string | null>>;
   modelError?: string;
-};
-
-type SlashCommandsResponse = {
-  commands?: SlashCommandInfo[];
 };
 
 export function useAgentSession(opts: UseAgentSessionOptions) {
@@ -399,7 +373,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const loadTools = useCallback(async (sid: string) => {
     try {
-      const tools = await sendAgentCommand<ToolEntry[]>(sid, { type: "get_tools" });
+      const tools = await sendAgentCommand(sid, { type: "get_tools" });
       if (tools) {
         const { getPresetFromTools } = await import("@/lib/tool-presets");
         setToolPresetState(getPresetFromTools(tools));
@@ -469,7 +443,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
     setSlashCommandsLoading(true);
     try {
-      const data = await sendAgentCommand<SlashCommandsResponse>(sid, { type: "get_commands" });
+      const data = await sendAgentCommand(sid, { type: "get_commands" });
       const commands = data?.commands ?? [];
       setSlashCommands(commands);
       return commands;
@@ -1050,7 +1024,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const clearQueuedMessages = useCallback(async (restoreToInput: boolean) => {
     const sid = sessionIdRef.current;
     if (!sid) return;
-    const result = await sendAgentCommand<{ steering?: string[]; followUp?: string[] }>(sid, { type: "clear_queue" });
+    const result = await sendAgentCommand(sid, { type: "clear_queue" });
     // clearQueue also emits an empty queue_update, but SSE may already be
     // settling after an abort. Clear locally so the card disappears at once.
     setQueuedMessages({ steering: [], followUp: [] });
@@ -1095,14 +1069,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (!sid) return;
     setForkingEntryId(entryId);
     try {
-      const result = await sendAgentCommand<{ cancelled?: boolean; newSessionId?: string }>(sid, {
+      const result = await sendAgentCommand(sid, {
         type: "fork",
         entryId,
         includeEntry: true,
       });
-      const { cancelled, newSessionId } = result ?? {};
-      if (!cancelled && newSessionId) {
-        onSessionForked?.(newSessionId);
+      if (result && !result.cancelled && result.newSessionId) {
+        onSessionForked?.(result.newSessionId);
       }
     } catch (e) {
       console.error("Fork failed:", e);
@@ -1122,7 +1095,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const sid = sessionIdRef.current;
     if (!sid) throw new Error("Session is unavailable.");
 
-    const result = await sendAgentCommand<{ cancelled?: boolean; targetId?: string }>(sid, {
+    const result = await sendAgentCommand(sid, {
       type: "navigate_before",
       entryId,
     });
@@ -1231,7 +1204,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           updateCompacting(true);
           setCompactResult(null);
           try {
-            const result = await sendAgentCommand<CompactCommandResult>(sid, {
+            const result = await sendAgentCommand(sid, {
               type: "compact",
               ...(args ? { customInstructions: args } : {}),
             });

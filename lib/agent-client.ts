@@ -7,10 +7,12 @@
 // Call sites previously repeated the same 5-line fetch block 13× in
 // hooks/useAgentSession.ts. This helper collapses that down to one line.
 
-export async function sendAgentCommand<T = unknown>(
+import type { AgentCommand, AgentCommandResult } from "./agent/protocol/commands";
+
+export async function sendAgentCommand<C extends AgentCommand>(
   sessionId: string,
-  command: Record<string, unknown>,
-): Promise<T> {
+  command: C,
+): Promise<AgentCommandResult<C>> {
   const res = await fetch(`/api/agent/${encodeURIComponent(sessionId)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -18,11 +20,11 @@ export async function sendAgentCommand<T = unknown>(
   });
   const body = (await res.json().catch(() => ({}))) as {
     success?: boolean;
-    data?: T;
+    data?: AgentCommandResult<C>;
     error?: string;
   };
   if (!res.ok || body.error) {
     throw new Error(body.error ?? `HTTP ${res.status}`);
   }
-  return body.data as T;
+  return body.data as AgentCommandResult<C>;
 }
