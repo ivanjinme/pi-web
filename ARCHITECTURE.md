@@ -68,6 +68,9 @@ Browser                Next.js Server              AgentSession (in-process)
 ## Representation Boundaries
 
 - Persisted entries ≠ Pi runtime events ≠ browser messages.
+- Browser timeline: full selected-leaf ancestry, including each compaction at
+  its persisted position. Model context: SDK compaction projection; never feed
+  the browser timeline back into model input.
 - Convert at existing adapters; do not leak storage/SDK shapes into UI state.
 - Tool-call fields differ across persisted/browser shapes; normalize every
   assistant-message load and stream path through `normalizeToolCalls()`.

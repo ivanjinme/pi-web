@@ -1,6 +1,5 @@
 import {
   SessionManager,
-  buildContextEntries as piBuildContextEntries,
   buildSessionContext as piBuildSessionContext,
   getAgentDir,
 } from "@earendil-works/pi-coding-agent";
@@ -212,17 +211,21 @@ export function buildSessionContext(
   const piEntries = entries as unknown as PiSessionEntry[];
   const piCtx = piBuildSessionContext(piEntries, leafId, byId as unknown as Map<string, PiSessionEntry>);
 
-  const contextEntries = piBuildContextEntries(
-    piEntries,
-    leafId,
-    byId as unknown as Map<string, PiSessionEntry>,
-  );
+  // 聊天展示沿当前分支保留完整历史；模型上下文仍由 SDK 独立处理压缩。
+  const timelineEntries: SessionEntry[] = [];
+  let current = leafId === null
+    ? undefined
+    : (leafId ? byId.get(leafId) : undefined) ?? entries[entries.length - 1];
+  while (current) {
+    timelineEntries.push(current);
+    current = current.parentId ? byId.get(current.parentId) : undefined;
+  }
+  timelineEntries.reverse();
 
-  // Convert the SDK-selected context entries and their IDs together. This keeps
-  // fork/navigation targets aligned while preserving pi's compaction ordering.
+  // 消息和持久化 ID 同步转换，保持分支导航、编辑与 fork 的定位一致。
   const messages: AgentMessage[] = [];
   const entryIds: string[] = [];
-  for (const entry of contextEntries) {
+  for (const entry of timelineEntries) {
     const localEntry = entry as unknown as SessionEntry;
     const m = entryToUiMessage(localEntry, options);
     if (m) {

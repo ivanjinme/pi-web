@@ -119,14 +119,8 @@ function hasDisplayableProcessMessage(message: AgentMessage): boolean {
   return message.role === "custom";
 }
 
-// A user message normally anchors a turn (user prompt → process → final
-// answer), and the process messages in between get folded into a collapsed
-// ProcessDetailsGroup. When compaction fires mid-turn, pi drops the original
-// user prompt and inserts a compaction summary (role "custom", customType
-// "compaction") in its place; the agent then keeps producing tool calls and a
-// final answer with no user message left to anchor them. Treat a compaction
-// summary as an anchor too, otherwise every post-compaction message renders
-// standalone and never collapses.
+// 用户消息与压缩摘要都作为过程分组锚点，确保摘要在时间线中独立展示，
+// 并让压缩后继续生成的工具调用与回答仍归入可折叠的过程组。
 function isGroupAnchor(message: AgentMessage): boolean {
   if (message.role === "user") return true;
   return message.role === "custom" && (message as CustomMessage).customType === "compaction";
@@ -534,11 +528,8 @@ export function ChatWindow({ session, newSessionCwd, newTaskDraftId, showProject
               for (let i = messages.length - 1; i >= 0; i--) {
                 if (messages[i].role === "user") { lastUserIdx = i; break; }
               }
-              // Anchor for live-tail detection: the last user message, or a
-              // compaction summary when compaction has replaced it mid-turn.
-              // Computed independently from lastUserIdx (which is kept for the
-              // scroll-to-user ref) because a compaction summary can sit after
-              // the last user message and anchor the still-streaming segment.
+              // 压缩摘要可能位于最后一条用户消息之后，因此实时尾部分组锚点
+              // 与滚动定位使用的 lastUserIdx 独立计算。
               let lastAnchorIdx = -1;
               for (let i = messages.length - 1; i >= 0; i--) {
                 if (isGroupAnchor(messages[i])) { lastAnchorIdx = i; break; }
