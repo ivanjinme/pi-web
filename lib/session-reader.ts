@@ -303,9 +303,14 @@ function entryToUiMessage(
   // normalizeToolCalls is a secondary guard (returns non-assistant messages as-is).
   switch (entry.type) {
     case "message": {
+      const normalized = normalizeToolCalls(entry.message);
+      // 模型时间戳是生成开始时间；历史 UI 的耗时需要落盘时的完成时间。
+      const completed = normalized.role === "assistant"
+        ? { ...normalized, timestamp: parseEntryTimestamp(entry.timestamp) ?? normalized.timestamp }
+        : normalized;
       const message = options.deferToolResultImages
-        ? omitToolResultBase64Images(normalizeToolCalls(entry.message))
-        : normalizeToolCalls(entry.message);
+        ? omitToolResultBase64Images(completed)
+        : completed;
       if (!options.deferThinking || message.role !== "assistant") return message;
       return {
         ...message,
