@@ -27,6 +27,7 @@ import {
   validateUploadFileNames,
 } from "@/lib/file-upload";
 import { parseFormDataWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
+import { FileWriteError, isEditableFile, readTextBody, writeExistingText } from "@/lib/file-write";
 
 const IGNORED_NAMES = new Set([
   "node_modules", ".git", ".next", "dist", "build", "__pycache__",
@@ -421,6 +422,24 @@ ${bodyHtml}
 </html>`;
 }
 
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> },
+) {
+  if (!isApiRequestAllowed(request)) return NextResponse.json({ error: "Access denied" }, { status: 403 });
+  try {
+    const { path: segments } = await params;
+    const target = filePathFromSegments(segments);
+    const roots = await getAllowedFileRoots();
+    if (!isFilePathAllowed(target, roots)) throw new FileWriteError(403, "Access denied");
+    const bytes = await readTextBody(request);
+    return NextResponse.json({ size: writeExistingText(target, roots, bytes) });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to write file" },
+      { status: error instanceof FileWriteError ? error.status : 500 });
+  }
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
@@ -480,7 +499,7 @@ export async function GET(
       }
       const content = fs.readFileSync(filePath, "utf-8");
       const language = getLanguage(filePath);
-      return NextResponse.json({ content, language, size: stat.size });
+      return NextResponse.json({ content, language, size: stat.size, editable: isEditableFile(filePath, allowedRoots) });
     }
 
     if (type === "download") {
@@ -503,6 +522,7 @@ export async function GET(
         language: getLanguage(filePath),
         mime: imageMime || audioMime || documentMime || "text/plain",
         previewKind: documentPreviewKind(filePath),
+        editable: isEditableFile(filePath, allowedRoots),
       });
     }
 

@@ -24,6 +24,11 @@ import { CodeBlock, MermaidBlock } from "./MermaidBlock";
 import { parseUnifiedPatch } from "@/lib/patch";
 import type { GitFileDiffResponse } from "@/lib/git-types";
 import { useI18n } from "@/hooks/useI18n";
+import { SourceEditor } from "./SourceEditor";
+import { MarkdownEditor } from "./MarkdownEditor";
+import { useFileDraft } from "@/hooks/useFileDraft";
+import type { FileDraftCoordinator } from "@/lib/file-draft";
+import { markdownFallbackReason } from "@/lib/markdown-editing";
 
 interface Props {
   filePath: string;
@@ -33,12 +38,7 @@ interface Props {
   onMentionLines?: (relativePath: string, startLine: number, endLine: number) => void;
   gitRefreshKey?: number;
   initialDisplayMode?: DisplayMode;
-}
-
-interface FileData {
-  content: string;
-  language: string;
-  size: number;
+  fileDrafts: FileDraftCoordinator;
 }
 
 type DisplayMode = "source" | "preview" | "diff";
@@ -412,7 +412,7 @@ function DiffView({ patch }: { patch: string }) {
   );
 }
 
-function ImageViewer({ filePath, cwd, sourceSessionId }: Props) {
+function ImageViewer({ filePath, cwd, sourceSessionId }: Omit<Props, "fileDrafts">) {
   const { t } = useI18n();
   const [watching, setWatching] = useState(false);
   const [bust, setBust] = useState(0);
@@ -546,7 +546,7 @@ function formatDuration(seconds: number): string {
   return `${mins}:${String(secs).padStart(2, "0")}`;
 }
 
-function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
+function AudioViewer({ filePath, cwd, sourceSessionId }: Omit<Props, "fileDrafts">) {
   const { t } = useI18n();
   const [watching, setWatching] = useState(false);
   const [bust, setBust] = useState(0);
@@ -663,7 +663,7 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
   );
 }
 
-function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
+function DocumentViewer({ filePath, cwd, sourceSessionId }: Omit<Props, "fileDrafts">) {
   const { t } = useI18n();
   const [watching, setWatching] = useState(false);
   const [bust, setBust] = useState(0);
@@ -785,7 +785,7 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
   );
 }
 
-export function FileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionLines, gitRefreshKey, initialDisplayMode }: Props) {
+export function FileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionLines, gitRefreshKey, initialDisplayMode, fileDrafts }: Props) {
   if (isImagePath(filePath)) {
     return <ImageViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
   }
@@ -795,15 +795,20 @@ export function FileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMenti
   if (isDocumentPreviewPath(filePath)) {
     return <DocumentViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
   }
-  return <TextFileViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} onOpenFile={onOpenFile} onMentionLines={onMentionLines} gitRefreshKey={gitRefreshKey} initialDisplayMode={initialDisplayMode} />;
+  return <TextFileViewer key={filePath} filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} onOpenFile={onOpenFile} onMentionLines={onMentionLines} gitRefreshKey={gitRefreshKey} initialDisplayMode={initialDisplayMode} fileDrafts={fileDrafts} />;
 }
 
-function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionLines, gitRefreshKey, initialDisplayMode }: Props) {
+function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionLines, gitRefreshKey, initialDisplayMode, fileDrafts }: Props) {
   const { isDark } = useTheme();
   const { t } = useI18n();
-  const [data, setData] = useState<FileData | null>(null);
+  const draft = useFileDraft(fileDrafts, filePath);
+  const language = draft?.language ?? "text";
+  const [markdownUnsafe, setMarkdownUnsafe] = useState<string | null>(null);
+  const [plainHighlight, setPlainHighlight] = useState(false);
+  const contentRequestRef = useRef(0);
+  const lastReadTextRef = useRef<string | null>(null);
   const [gitDiff, setGitDiff] = useState<GitFileDiffResponse | null>(null);
-  const [gitDiffLoading, setGitDiffLoading] = useState(false);
+  const [gitDiffLoading, setGitDiffLoading] = useState(initialDisplayMode === "diff");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [displayMode, setDisplayMode] = useState<DisplayMode>("source");
@@ -811,26 +816,24 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
   const [watching, setWatching] = useState(false);
   const esRef = useRef<EventSource | null>(null);
   const gitDiffRequestRef = useRef(0);
+  const gitRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const [selectedLineRange, setSelectedLineRange] = useState<SelectedLineRange | null>(null);
 
-  const fetchContent = useCallback((filePath: string) => {
-    return fetch(getFileApiUrl(filePath, "read", sourceSessionId))
-      .then((r) => r.json())
-      .then((d: FileData & { error?: string }) => {
-        if (d.error) {
-          setError(d.error);
-          return null;
-        }
-        setError(null);
-        setData(d);
-        return d;
-      })
-      .catch((e) => {
-        setError(String(e));
-        return null;
-      });
-  }, [sourceSessionId]);
+  const fetchContent = useCallback(async (targetPath: string) => {
+    const request = ++contentRequestRef.current;
+    try {
+      const next = await fileDrafts.refresh(targetPath, sourceSessionId);
+      if (request !== contentRequestRef.current || !next) return null;
+      setError(null);
+      if (lastReadTextRef.current !== next.content) setMarkdownUnsafe(null);
+      lastReadTextRef.current = next.content;
+      return next;
+    } catch (error) {
+      if (request === contentRequestRef.current) setError(String(error));
+      return null;
+    }
+  }, [fileDrafts, sourceSessionId]);
 
   const fetchGitDiff = useCallback(async (targetPath: string) => {
     const requestId = ++gitDiffRequestRef.current;
@@ -854,15 +857,21 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
     }
   }, [cwd]);
 
+  const scheduleGitDiff = useCallback((targetPath: string) => {
+    clearTimeout(gitRefreshTimerRef.current);
+    gitRefreshTimerRef.current = setTimeout(() => void fetchGitDiff(targetPath), 100);
+  }, [fetchGitDiff]);
+
   // Initial load + SSE watch setup
   useEffect(() => {
     setLoading(true);
     setError(null);
-    setData(null);
     setGitDiff(null);
     setDisplayMode("source");
     setWrapLines(false);
     setWatching(false);
+    setMarkdownUnsafe(null);
+    setSelectedLineRange(null);
 
     if (esRef.current) {
       esRef.current.close();
@@ -872,6 +881,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
     fetchContent(filePath).finally(() => setLoading(false));
 
     // Set up SSE watch
+    const requests = contentRequestRef;
     const es = new EventSource(getFileApiUrl(filePath, "watch", sourceSessionId));
     esRef.current = es;
 
@@ -881,7 +891,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
 
     es.addEventListener("change", () => {
       void fetchContent(filePath);
-      void fetchGitDiff(filePath);
+      if (fileDrafts.get(filePath)?.status === "saved") scheduleGitDiff(filePath);
     });
 
     es.addEventListener("error", () => {
@@ -893,20 +903,23 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
     };
 
     return () => {
+      ++requests.current;
       es.close();
       esRef.current = null;
     };
-  }, [filePath, fetchContent, fetchGitDiff, sourceSessionId]);
+  }, [filePath, fetchContent, scheduleGitDiff, sourceSessionId, fileDrafts]);
 
   useEffect(() => {
-    void fetchGitDiff(filePath);
-  }, [fetchGitDiff, filePath, gitRefreshKey]);
+    scheduleGitDiff(filePath);
+    return () => clearTimeout(gitRefreshTimerRef.current);
+  }, [scheduleGitDiff, filePath, gitRefreshKey]);
 
+  // 读取上下文变化会重置视图；缓存语言未变时也要恢复 Markdown 默认模式。
   useEffect(() => {
-    if (data?.language === "markdown" && initialDisplayMode !== "diff") {
+    if (language === "markdown" && initialDisplayMode !== "diff") {
       setDisplayMode("preview");
     }
-  }, [data?.language, initialDisplayMode]);
+  }, [language, initialDisplayMode, cwd, sourceSessionId]);
 
   const hasGitDiff = gitDiff?.supported === true && typeof gitDiff.patch === "string";
   const isDeletedDiff = hasGitDiff && gitDiff.status === "deleted";
@@ -936,9 +949,13 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
     }
   }, [initialDisplayMode, hasGitDiff]);
 
+  const content = draft?.text ?? "";
+  const fallbackReason = useMemo(() => displayMode === "preview" && language === "markdown"
+    ? markdownUnsafe ?? markdownFallbackReason(content, filePath) : null,
+    [displayMode, language, markdownUnsafe, content, filePath]);
   const markdownPreview = useMemo(
-    () => (data?.language === "markdown" ? normalizeDisplayMath(data.content) : ""),
-    [data],
+    () => (displayMode === "preview" && language === "markdown" && (!draft?.editable || fallbackReason) ? normalizeDisplayMath(content) : ""),
+    [language, content, displayMode, draft?.editable, fallbackReason],
   );
 
   useEffect(() => {
@@ -951,12 +968,13 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
       );
     };
 
+    if (draft?.editable) return;
     updateSelectedLineRange();
     if (!onMentionLines || displayMode !== "source") return;
 
     document.addEventListener("selectionchange", updateSelectedLineRange);
     return () => document.removeEventListener("selectionchange", updateSelectedLineRange);
-  }, [data?.content, displayMode, onMentionLines]);
+  }, [content, displayMode, onMentionLines, draft?.editable]);
 
   const mentionLineRange = useCallback((lineRange: SelectedLineRange | null) => {
     if (!onMentionLines || !lineRange) return;
@@ -992,7 +1010,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [displayMode, mentionLineRange, onMentionLines]);
 
-  if (loading || (initialDisplayMode === "diff" && gitDiffLoading && !data)) {
+  if (loading || (initialDisplayMode === "diff" && gitDiffLoading && !autoDiffAppliedRef.current)) {
     return (
       <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
         {t("i18n.loading")}
@@ -1000,7 +1018,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
     );
   }
 
-  if (error && !isDeletedDiff) {
+  if (error && !isDeletedDiff && !draft?.editable) {
     return (
       <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#f87171", fontSize: 13 }}>
         {error}
@@ -1008,17 +1026,15 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
     );
   }
 
-  if (!data && !isDeletedDiff) return null;
+  if (draft?.size == null && !isDeletedDiff) return null;
 
-  const language = data?.language ?? "text";
-  const content = data?.content ?? "";
   const isHtml = language === "html";
   const isMarkdown = language === "markdown";
   const hasPreview = isHtml || isMarkdown;
   const markdownDirectory = getFileDirectory(filePath);
-  const lines = content.split("\n");
+  const lines = content.split(/\r\n|\r|\n/);
   const useLightweightSource = lines.length > SOURCE_HIGHLIGHT_MAX_LINES;
-  const effectiveDisplayMode = isDeletedDiff ? "diff" : displayMode;
+  const effectiveDisplayMode = isDeletedDiff || (initialDisplayMode === "diff" && hasGitDiff && !autoDiffAppliedRef.current) ? "diff" : displayMode;
   const displayModes: DisplayMode[] = isDeletedDiff
     ? ["diff"]
     : [
@@ -1028,10 +1044,15 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
       ];
   const metadata = isDeletedDiff
     ? t("files.deleted")
-    : `${language} · ${lines.length} lines · ${formatSize(data!.size)}`;
+    : `${language} · ${lines.length} lines · ${formatSize(draft?.editable ? new TextEncoder().encode(content).length : draft?.size ?? 0)}`;
 
   return (
-    <div className="file-viewer-shell" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+    <div className="file-viewer-shell" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}
+      onKeyDownCapture={(event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+          event.preventDefault(); event.stopPropagation(); void fileDrafts.flush(filePath);
+        }
+      }}>
       <div
         className="file-viewer-toolbar"
         style={{
@@ -1050,7 +1071,12 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
           {getRelativeFilePath(filePath, cwd)}
         </span>
 
-        <span className="file-viewer-meta" title={metadata}>{metadata}</span>
+        <span className="file-viewer-meta" title={`${metadata}${displayMode === "source" && plainHighlight ? ` · ${t("files.plainHighlight")}` : ""}`}>{metadata}{displayMode === "source" && plainHighlight ? ` · ${t("files.plainHighlight")}` : ""}</span>
+        {!isDeletedDiff && <span className={`file-save-status ${draft?.status ?? "saved"}`} role="status" title={draft?.error ?? error ?? undefined}>
+          {draft?.editable ? t(`files.${draft.status}`) : t("files.readOnly")}
+          {(draft?.error || error) && draft?.status !== "failed" && <span aria-label={draft?.error ?? error ?? undefined}> ⚠</span>}
+          {draft?.status === "failed" && <button onClick={() => void fileDrafts.flush(filePath)}>{t("files.retry")}</button>}
+        </span>}
         {!isDeletedDiff && (
           <span
             title={watching ? t("i18n.liveSync") : t("i18n.notWatching")}
@@ -1072,7 +1098,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
                   <button
                     key={mode}
                     type="button"
-                    onClick={() => setDisplayMode(mode)}
+                    onClick={() => { void fileDrafts.flush(filePath); setDisplayMode(mode); }}
                     title={mode === "diff" ? t("i18n.compareHead") : undefined}
                     aria-pressed={active}
                     className="file-viewer-mode-button"
@@ -1140,11 +1166,16 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
             style={{ width: "100%", height: "100%", border: "none", background: "var(--bg)" }}
              title={t("i18n.htmlPreview")}
           />
+        ) : isMarkdown && effectiveDisplayMode === "preview" && draft?.editable && !fallbackReason ? (
+          <MarkdownEditor filePath={filePath} value={content} cwd={cwd} sourceSessionId={sourceSessionId} dark={isDark}
+            onChange={(value) => fileDrafts.edit(filePath, value)} onFlush={() => void fileDrafts.flush(filePath)}
+            onComposition={(active) => fileDrafts.composition(filePath, active)} onOpenFile={onOpenFile} onUnsafe={setMarkdownUnsafe} />
         ) : isMarkdown && effectiveDisplayMode === "preview" ? (
           <div
             className="markdown-body markdown-file-preview"
             style={{ padding: "24px 32px" }}
           >
+            {draft?.editable && fallbackReason && <div className="file-markdown-fallback" role="status">{t("files.markdownFallback")} ({fallbackReason})</div>}
             <ReactMarkdown
               remarkPlugins={markdownPreviewRemarkPlugins}
               rehypePlugins={markdownPreviewRehypePlugins}
@@ -1206,6 +1237,10 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
               {markdownPreview}
             </ReactMarkdown>
           </div>
+        ) : draft?.editable ? (
+          <SourceEditor filePath={filePath} value={content} language={language} dark={isDark} wrap={wrapLines}
+            onChange={(value) => { setMarkdownUnsafe(null); fileDrafts.edit(filePath, value); }} onFlush={() => void fileDrafts.flush(filePath)}
+            onComposition={(active) => fileDrafts.composition(filePath, active)} onSelection={setSelectedLineRange} onMention={mentionLineRange} onLanguageFallback={setPlainHighlight} />
         ) : useLightweightSource ? (
           <div
             className="file-source-view is-lightweight"

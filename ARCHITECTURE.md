@@ -101,7 +101,19 @@ Browser                Next.js Server              AgentSession (in-process)
 - File APIs are not a general filesystem browser.
 - Browsable roots: session/project-derived or explicitly allowed.
 - Existing paths: realpath-aware containment; lexical checks are insufficient.
-- Out-of-root file/bash reads: require a reference from that session.
+- Out-of-root file/bash reads: require a reference from that session; references
+  never authorize writes.
+- Text writes: existing regular UTF-8 files within the same lexical and realpath
+  allowed roots, at most 256 KiB; validate before modifying the opened descriptor.
+  Recognized media/documents and binary/invalid UTF-8 targets remain read-only.
+- File drafts belong to AppShell, keyed by normalized absolute path, not sessions
+  or active tabs. Source and compatible Markdown share one draft and serialized
+  autosave lane. Failed/dirty drafts survive closing and project switches.
+- File synchronization is last-write-wins: SSE reads only replace clean drafts;
+  dirty/in-flight/composing drafts defer and coalesce external refresh. No conflict
+  protocol, lock, merge, or persistent/global draft store.
+- Both editors treat different external text as a new Undo/Redo baseline;
+  same-content refresh and local draft echoes preserve editing history.
 - Project extensions and `.agents/skills`: executable repo content; require
   project trust.
 - Trust change: reject busy project → destroy affected wrappers →

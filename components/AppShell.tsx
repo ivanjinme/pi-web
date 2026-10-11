@@ -6,6 +6,8 @@ import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import { FileViewer } from "./FileViewer";
+import { FileDraftStatus } from "./FileDraftStatus";
+import { createFileDraftCoordinator } from "@/hooks/useFileDraft";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { TabBar, type Tab } from "./TabBar";
 import { SettingsModal } from "./SettingsModal";
@@ -68,6 +70,7 @@ export function AppShell() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [sessionKey, setSessionKey] = useState(0);
   const [explorerRefreshKey, setExplorerRefreshKey] = useState(0);
+  const [fileDrafts] = useState(() => createFileDraftCoordinator(() => setExplorerRefreshKey((key) => key + 1)));
   const [settingsContext, setSettingsContext] = useState<SettingsContext | null>(null);
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -795,6 +798,7 @@ export function AppShell() {
 
   return (
     <>
+    <FileDraftStatus coordinator={fileDrafts} onOpen={(path) => handleOpenFile(path, getFileName(path))} />
     <style>{`
       @keyframes session-info-pop {
         0% {
@@ -1528,6 +1532,7 @@ export function AppShell() {
                 <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
                   {activeFileTab?.filePath ? (
                     <FileViewer
+                      fileDrafts={fileDrafts}
                       filePath={activeFileTab.filePath}
                       cwd={activeCwd}
                       sourceSessionId={activeFileTab.sourceSessionId}

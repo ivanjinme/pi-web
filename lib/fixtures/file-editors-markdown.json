@@ -1,0 +1,12 @@
+[
+  {"name":"basic", "markdown":"# Heading\n\nHello **bold** and *italic* with [link](https://example.com).\n\n- first\n  - nested\n- second\n\n> quote\n\n---\n\n| A | B |\n| - | - |\n| x | y |\n\n- [ ] todo\n- [x] done\n"},
+  {"name":"code", "markdown":"Paragraph.\n\n```ts\nconst value = 1;\n```\n\n```mermaid\ngraph TD\n  A --> B\n```\n"},
+  {"name":"math", "markdown":"Paragraph with $x^2$ and \\(y\\).\n\n$$\nx + y = 1\n$$\n\n\\[\nz = 2\n\\]\n"},
+  {"name":"html", "markdown":"Paragraph.\n\n<div class=\"note\">Keep <em>this</em>.</div>\n"},
+  {"name":"unknown-tag", "markdown":"Paragraph.\n\n<artifact type=\"example\">Keep everything.</artifact>\n"},
+  {"name":"frontmatter", "markdown":"---\ntitle: Example\ntags: [one, two]\n---\n\nParagraph.\n"},
+  {"name":"resources", "markdown":"Paragraph.\n\n![local image](./images/test.png)\n\n[Windows](C:\\Users\\tester\\note.md) and [relative](./note.md).\n\n[reference][docs]\n\n[docs]: https://example.com/docs \"Docs\"\n"},
+  {"name":"crlf-bom", "markdown":"﻿# Heading\r\n\r\nParagraph with \\*literal\\*.\r\n\r\n"},
+  {"name":"spacing", "markdown":"Heading\n=======\n\n\nParagraph with  two spaces.\n\n* item\n\n    More text.\n\n\n"},
+  {"name":"plain", "markdown":"Paragraph."}
+]

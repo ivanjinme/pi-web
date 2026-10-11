@@ -584,6 +584,21 @@ pre, code {
   }
 }
 
+.file-save-status { flex-shrink: 0; white-space: nowrap; color: var(--text-muted); }
+.file-save-status.failed { color: var(--error, #dc2626); }
+.file-save-status button, .file-draft-errors button { margin-left: 6px; text-decoration: underline; cursor: pointer; }
+.file-draft-errors { position: fixed; bottom: 52px; right: 16px; z-index: 100; max-width: min(480px, calc(100vw - 32px)); max-height: 40vh; overflow: auto; padding: 12px; background: var(--bg-panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 20px #0002; }
+.file-draft-errors > div { display: flex; gap: 8px; align-items: baseline; }
+.file-draft-errors span { overflow-wrap: anywhere; }
+.file-markdown-fallback { margin-bottom: 16px; padding: 8px 12px; border-left: 2px solid var(--border); color: var(--text-muted); font-size: 12px; }
+.file-source-editor .cm-editor { min-height: 100%; }
+.file-source-editor .cm-editor.cm-focused { outline: none; }
+.dark .file-source-editor .cm-line > span { filter: brightness(1.7); }
+.file-markdown-editor { --baseBase: var(--bg); --baseBgSubtle: var(--bg-panel); --baseBg: var(--bg-panel); --baseText: var(--text-muted); --baseTextContrast: var(--text); --baseBorder: var(--border); min-height: 100%; color: var(--text); }
+.file-markdown-editor .mdxeditor { color: var(--text); background: var(--bg); }
+.file-markdown-editor .markdown-file-preview { padding: 24px 32px; min-height: 200px; font-family: inherit; }
+.file-markdown-editor .markdown-file-preview:focus-visible { outline: none; }
+
 /* File viewer toolbar */
 .file-viewer-toolbar {
   min-width: 0;
