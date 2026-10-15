@@ -26,6 +26,26 @@ test("does not render system instructions as user or assistant chat bubbles", ()
   }), "");
 });
 
+for (const blockContent of [false, true]) {
+  test(`renders expanded skill commands without their body (${blockContent ? "blocks" : "string"})`, () => {
+    const text = '<skill name="frontend-design" location="/private/skills/frontend-design/SKILL.md">\nPrivate skill instructions\n</skill>\n\n设计首页';
+    const message = {
+      role: "user",
+      content: blockContent ? [
+        { type: "text", text },
+        { type: "image", source: { type: "url", url: "https://example.com/input.png" } },
+      ] : text,
+    };
+    const original = structuredClone(message);
+    const html = renderMessage(message);
+
+    assert.match(html, /\/skill:frontend-design 设计首页/);
+    assert.doesNotMatch(html, /Private skill instructions|\/private\/skills|&lt;skill/);
+    if (blockContent) assert.match(html, /<img/);
+    assert.deepEqual(message, original);
+  });
+}
+
 const largeText = `<strong>${"x".repeat(100_000)}</strong>`;
 
 for (const [name, message] of [

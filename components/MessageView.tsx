@@ -5,7 +5,7 @@ import { MarkdownBody } from "./MarkdownBody";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 import { compactionSummaryBody } from "@/lib/compaction-summary";
-import { getTextPhase, getAssistantErrorMessage, isEmptyThinkingBlock } from "@/lib/message-display";
+import { getTextPhase, getAssistantErrorMessage, getUserMessageDisplayText, isEmptyThinkingBlock } from "@/lib/message-display";
 import { parseUnifiedPatch, type SplitDiffCell } from "@/lib/patch";
 import type {
   AgentMessage,
@@ -196,7 +196,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onEditFromHere }: 
   const [submittingEdit, setSubmittingEdit] = useState(false);
   const editRef = useRef<HTMLTextAreaElement>(null);
 
-  const content = getMessageText(message.content);
+  const content = getUserMessageDisplayText(getMessageText(message.content));
   const imageBlocks = getMessageImages(message.content);
 
   const time = formatTime(message.timestamp);
