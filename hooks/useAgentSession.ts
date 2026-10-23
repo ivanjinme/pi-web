@@ -880,7 +880,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           setCompactResult(null);
         } else if (!event.aborted) {
           setCompactResult(readCompactResult(event.result, (event.reason as string | undefined) ?? "auto"));
-          if (sessionIdRef.current) loadSession(sessionIdRef.current);
+          if (sessionIdRef.current) loadSession(sessionIdRef.current, false, true);
         }
         break;
       case "extension_ui_request":
@@ -1209,7 +1209,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
               ...(args ? { customInstructions: args } : {}),
             });
             setCompactResult(readCompactResult(result, "manual"));
-            if (await loadSession(sid, true)) promoteNewSession();
+            if (await loadSession(sid, true, true)) promoteNewSession();
             return complete({ handled: true, message: "Compacted context" });
           } finally {
             updateCompacting(false);

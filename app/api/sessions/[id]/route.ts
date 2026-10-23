@@ -12,6 +12,7 @@ import {
 } from "@/lib/session-reader";
 import { sessionPathKey } from "@/lib/session-path";
 import { getRpcSession } from "@/lib/rpc-manager";
+import { setSidebarPin } from "@/lib/sidebar-pins";
 
 // BranchNavigator still traverses recursively, so keep the response tree shallow.
 const MAX_PROJECTED_TREE_DEPTH = 200;
@@ -205,6 +206,9 @@ export async function DELETE(
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
+
+    // 先清理置顶；失败时保留会话文件、子会话关系和运行实例。
+    setSidebarPin({ type: "session", id }, false);
 
     // Read only the bounded header before deleting.
     const parentSessionPath = readSessionHeader(filePath)?.parentSession;

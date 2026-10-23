@@ -14,6 +14,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { SessionInfo } from "@/lib/types";
+import type { SidebarPin } from "@/lib/sidebar-pins";
 import {
   PROJECT_FOLDERS_CHANGED_EVENT,
   forgetProjectFolder,
@@ -141,26 +142,7 @@ function PathLabel({ text, style }: { text: string; style?: CSSProperties }) {
 }
 
 const DROPDOWN_ANIMATION_MS = 140;
-const PINNED_PROJECTS_STORAGE_KEY = "pi-web:pinned-projects";
 const PROJECT_LABELS_STORAGE_KEY = "pi-web:project-labels";
-
-function loadStringArray(key: string): string[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const value = JSON.parse(window.localStorage.getItem(key) ?? "[]") as unknown;
-    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveStringArray(key: string, values: string[]): void {
-  try {
-    window.localStorage.setItem(key, JSON.stringify(values));
-  } catch {
-    // Ignore storage quota and privacy-mode errors.
-  }
-}
 
 function loadProjectLabels(): Record<string, string> {
   if (typeof window === "undefined") return {};
@@ -249,7 +231,7 @@ function SidebarMoreMenu({ label, children }: { label: string; children: ReactNo
           className="sidebar-action-popover"
           role="menu"
           style={{ top: position.top, left: position.left }}
-          onClick={() => setOpen(false)}
+          onClick={(event) => { event.stopPropagation(); setOpen(false); }}
         >
           {children}
         </div>,
@@ -641,10 +623,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [sessionSearch, setSessionSearch] = useState("");
   const [projectsOpen, setProjectsOpen] = useState(true);
   const [allProjectsVisible, setAllProjectsVisible] = useState(false);
-  const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(() => new Set());
+  const [projectVisibleCounts, setProjectVisibleCounts] = useState<Record<string, number>>({});
   const [projectFolders, setProjectFolders] = useState<string[]>([]);
   const [hiddenProjectFolders, setHiddenProjectFolders] = useState<string[]>(() => loadHiddenProjectFolders());
-  const [pinnedProjects, setPinnedProjects] = useState<Set<string>>(() => new Set());
+  const [pins, setPins] = useState<SidebarPin[]>([]);
+  const [pinsOpen, setPinsOpen] = useState(true);
+  const [pinsReady, setPinsReady] = useState(false);
+  const [pinsBusy, setPinsBusy] = useState(false);
+  const [pinsError, setPinsError] = useState<string | null>(null);
+  const pinnedProjects = useMemo(() => new Set(pins.filter((pin) => pin.type === "project").map((pin) => projectPathKey(pin.id))), [pins]);
+  const pinnedSessionIds = useMemo(() => new Set(pins.filter((pin) => pin.type === "session").map((pin) => pin.id)), [pins]);
   const [projectLabels, setProjectLabels] = useState<Record<string, string>>({});
   const [editingProject, setEditingProject] = useState<string | null>(null);
   const [removingProject, setRemovingProject] = useState<string | null>(null);
@@ -676,11 +664,34 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       setHiddenProjectFolders(loadHiddenProjectFolders());
     };
     reloadProjectFolders();
-    setPinnedProjects(new Set(loadStringArray(PINNED_PROJECTS_STORAGE_KEY)));
     setProjectLabels(loadProjectLabels());
     window.addEventListener(PROJECT_FOLDERS_CHANGED_EVENT, reloadProjectFolders);
     return () => window.removeEventListener(PROJECT_FOLDERS_CHANGED_EVENT, reloadProjectFolders);
   }, []);
+
+  const requestPins = useCallback(async (method = "GET", body?: object): Promise<boolean> => {
+    setPinsBusy(true);
+    setPinsError(null);
+    try {
+      const response = await fetch("/api/sidebar-pins", {
+        method,
+        headers: body ? { "Content-Type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await response.json() as { pins: SidebarPin[]; error?: string };
+      if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
+      setPins(data.pins);
+      setPinsReady(true);
+      return true;
+    } catch (error) {
+      setPinsError(String(error));
+      return false;
+    } finally {
+      setPinsBusy(false);
+    }
+  }, []);
+
+  useEffect(() => { void requestPins(); }, [requestPins]);
 
   const loadSessions = useCallback(async (showLoading = false) => {
     try {
@@ -1009,17 +1020,18 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, [createNewSession, selectedCwd]);
 
   const toggleProjectPin = useCallback((root: string) => {
-    setPinnedProjects((previous) => {
-      const next = new Set(previous);
-      if (next.has(root)) {
-        next.delete(root);
-      } else {
-        next.add(root);
-      }
-      saveStringArray(PINNED_PROJECTS_STORAGE_KEY, [...next]);
-      return next;
-    });
-  }, []);
+    void requestPins("PATCH", { type: "project", id: root, pinned: !pinnedProjects.has(projectPathKey(root)) });
+  }, [pinnedProjects, requestPins]);
+
+  const toggleSessionPin = useCallback((id: string) => {
+    void requestPins("PATCH", { type: "session", id, pinned: !pinnedSessionIds.has(id) });
+  }, [pinnedSessionIds, requestPins]);
+
+  const handleSessionDeleted = (id: string) => {
+    onSessionDeleted?.(id);
+    void loadSessions();
+    void requestPins();
+  };
 
   const saveProjectEdit = useCallback(async (previousRoot: string, nextRoot: string, name: string) => {
     if (previousRoot !== nextRoot) {
@@ -1040,20 +1052,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       saveProjectLabels(next);
       return next;
     });
-    setPinnedProjects((previous) => {
-      if (!previous.has(previousRoot) || previousRoot === nextRoot) return previous;
-      const next = new Set(previous);
-      next.delete(previousRoot);
-      next.add(nextRoot);
-      saveStringArray(PINNED_PROJECTS_STORAGE_KEY, [...next]);
-      return next;
-    });
+    if (previousRoot !== nextRoot) await requestPins();
     if (projectRootFor(selectedCwd) === previousRoot) setSelectedCwd(nextRoot);
     await loadSessions(false);
     setEditingProject(null);
-  }, [loadSessions, projectRootFor, selectedCwd]);
+  }, [loadSessions, projectRootFor, requestPins, selectedCwd]);
 
-  const removeLocalProject = useCallback((root: string) => {
+  const removeLocalProject = useCallback(async (root: string) => {
+    if (pinnedProjects.has(projectPathKey(root)) && !await requestPins("PATCH", { type: "project", id: root, pinned: false })) return;
     setProjectFolders(forgetProjectFolder(root));
     setProjectLabels((previous) => {
       if (!(root in previous)) return previous;
@@ -1062,17 +1068,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       saveProjectLabels(next);
       return next;
     });
-    setPinnedProjects((previous) => {
-      if (!previous.has(root)) return previous;
-      const next = new Set(previous);
-      next.delete(root);
-      saveStringArray(PINNED_PROJECTS_STORAGE_KEY, [...next]);
-      return next;
-    });
     if (projectRootFor(selectedCwd) === root) setSelectedCwd(null);
     setHighlightedProjectRoot(null);
     setEditingProject(null);
-  }, [projectRootFor, selectedCwd]);
+    setRemovingProject(null);
+  }, [pinnedProjects, projectRootFor, requestPins, selectedCwd]);
 
   // Sessions of every worktree in the selected project are shown together
   const selectedProject = projectRootFor(selectedCwd);
@@ -1110,21 +1110,41 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }
 
     return [...groups.values()]
-      .sort((a, b) => {
-        const pinDifference = Number(pinnedProjects.has(b.root)) - Number(pinnedProjects.has(a.root));
-        return pinDifference || b.modified.localeCompare(a.modified);
-      })
-      .map((group) => ({ ...group, roots: buildSessionTree(group.sessions) }));
-  }, [allSessions, hiddenProjectFolders, normalizedSessionSearch, pinnedProjects, projectFolders, selectedProject]);
+      .sort((a, b) => b.modified.localeCompare(a.modified))
+      .map((group) => {
+        const sessions = group.sessions.filter((session) => !pinnedSessionIds.has(session.id));
+        return { ...group, sessions, roots: buildSessionTree(sessions) };
+      });
+  }, [allSessions, hiddenProjectFolders, normalizedSessionSearch, pinnedSessionIds, projectFolders, selectedProject]);
 
+  const visiblePins = useMemo(() => {
+    const sessionsById = new Map(allSessions.map((session) => [session.id, session]));
+    return pins.flatMap<{ pin: SidebarPin; session: SessionInfo | undefined; label: string }>((pin) => {
+      if (pin.type === "project") {
+        if (isProjectFolderHidden(pin.id, hiddenProjectFolders)) return [];
+        const label = projectLabels[pin.id] || projectDefaultLabel(pin.id);
+        const group = projectGroups.find((group) => projectPathKey(group.root) === projectPathKey(pin.id));
+        if (normalizedSessionSearch && ![label, pin.id].some((value) => value.toLowerCase().includes(normalizedSessionSearch)) && !group?.sessions.length) return [];
+        return [{ pin, session: undefined, label }];
+      }
+      const session = sessionsById.get(pin.id);
+      if (!session || isProjectFolderHidden(session.projectRoot ?? session.cwd, hiddenProjectFolders)) return [];
+      if (normalizedSessionSearch && ![session.name, session.firstMessage, session.cwd]
+        .some((value) => value?.toLowerCase().includes(normalizedSessionSearch))) return [];
+      const root = session.projectRoot ?? session.cwd;
+      return [{ pin, session, label: projectLabels[root] || projectDefaultLabel(root) }];
+    });
+  }, [allSessions, hiddenProjectFolders, normalizedSessionSearch, pins, projectGroups, projectLabels]);
+
+  const unpinnedProjectGroups = useMemo(() => projectGroups.filter((group) => !pinnedProjects.has(projectPathKey(group.root))), [pinnedProjects, projectGroups]);
   const visibleProjectGroups = useMemo(() => {
-    if (normalizedSessionSearch || allProjectsVisible || projectGroups.length <= 5) return projectGroups;
+    if (normalizedSessionSearch || allProjectsVisible || unpinnedProjectGroups.length <= 5) return unpinnedProjectGroups;
 
-    const visible = projectGroups.slice(0, 5);
-    const selected = projectGroups.find((group) => group.root === selectedProject);
+    const visible = unpinnedProjectGroups.slice(0, 5);
+    const selected = unpinnedProjectGroups.find((group) => group.root === selectedProject);
     if (selected && !visible.includes(selected)) visible[visible.length - 1] = selected;
     return visible;
-  }, [allProjectsVisible, normalizedSessionSearch, projectGroups, selectedProject]);
+  }, [allProjectsVisible, normalizedSessionSearch, unpinnedProjectGroups, selectedProject]);
 
   useEffect(() => {
     if (sessionSearchOpen) sessionSearchRef.current?.focus();
@@ -1135,6 +1155,85 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     && selectedCwd
     && selectedProject === worktreeState.projectRoot
   );
+
+  function renderProjectGroup(group: { root: string; sessions: SessionInfo[]; roots: SessionTreeNode[] }) {
+    const roots = group.roots;
+    const visibleCount = projectVisibleCounts[group.root] ?? 5;
+    const hasMore = roots.length > visibleCount;
+    let visibleRoots = roots.slice(0, visibleCount);
+
+    if (selectedSessionId) {
+      const sessionsById = new Map(group.sessions.map((session) => [session.id, session]));
+      let selectedRootId = selectedSessionId;
+      let parentId = sessionsById.get(selectedRootId)?.parentSessionId;
+      while (parentId && sessionsById.has(parentId)) {
+        selectedRootId = parentId;
+        parentId = sessionsById.get(parentId)?.parentSessionId;
+      }
+      const selectedRoot = roots.find((node) => node.session.id === selectedRootId);
+      if (selectedRoot && !visibleRoots.includes(selectedRoot)) {
+        visibleRoots = [...visibleRoots.slice(0, visibleCount - 1), selectedRoot];
+      }
+    }
+
+    const label = projectLabels[group.root] || projectDefaultLabel(group.root);
+    const isPinned = pinnedProjects.has(projectPathKey(group.root));
+    const isActive = !selectedSessionId && highlightedProjectRoot === group.root;
+    return (
+      <section className="project-section" key={group.root}>
+        <div className={`project-row${isActive ? " is-active" : ""}`}>
+          <button type="button" className="project-row-main" onClick={() => { setSelectedCwd(group.root); setHighlightedProjectRoot(null); }} aria-current={isActive ? "true" : undefined}>
+            <FolderIcon size={16} />
+            <span className="project-row-label">{label}</span>
+            {isPinned && <svg className="project-pin-indicator" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-label="Pinned"><path d="m14 4 6 6-4 1-4 4-1 5-3-3-3-3 5-1 4-4Z" /></svg>}
+          </button>
+          <SidebarMoreMenu label={`Actions for ${label}`}>
+            <button type="button" role="menuitem" disabled={!pinsReady || pinsBusy} onClick={() => toggleProjectPin(group.root)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14 4 6 6-4 1-4 4-1 5-3-3-3-3 5-1 4-4Z" /></svg>
+              <span>{isPinned ? "Unpin" : "Pin"}</span>
+            </button>
+            <button type="button" role="menuitem" onClick={() => setEditingProject(group.root)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" /></svg>
+              <span>Edit</span>
+            </button>
+            <button type="button" role="menuitem" className="is-danger" onClick={() => setRemovingProject(group.root)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="m19 6-1 14H6L5 6" /><path d="M10 11v5M14 11v5" /></svg>
+              <span>Remove</span>
+            </button>
+          </SidebarMoreMenu>
+          <button type="button" className="project-new-task" onClick={() => createNewSession(group.root)} aria-label={`New task in ${label}`}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+          </button>
+        </div>
+        <div className="project-sessions">
+          {visibleRoots.map((node) => (
+            <SessionTreeItem
+              key={node.session.id}
+              node={node}
+              selectedSessionId={selectedSessionId}
+              runningSessionIds={runningSessionIds}
+              unreadSessionIds={unreadSessionIds}
+              onSelectSession={handleSelectSessionFromList}
+              onRenamed={loadSessions}
+              onSessionDeleted={handleSessionDeleted}
+              pinnedSessionIds={pinnedSessionIds}
+              onTogglePin={toggleSessionPin}
+              pinDisabled={!pinsReady || pinsBusy}
+              depth={0}
+            />
+          ))}
+          {roots.length > 5 && (
+            <button type="button" className="project-show-more" onClick={() => setProjectVisibleCounts((previous) => ({
+              ...previous,
+              [group.root]: hasMore ? (previous[group.root] ?? 5) + 10 : 5,
+            }))}>
+              {hasMore ? "Show more" : "Show less"}
+            </button>
+          )}
+        </div>
+      </section>
+    );
+  }
 
   return (
     <div className="session-sidebar" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -1155,10 +1254,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         <ProjectRemoveConfirmDialog
           label={projectLabels[removingProject] || projectDefaultLabel(removingProject)}
           onCancel={() => setRemovingProject(null)}
-          onConfirm={() => {
-            removeLocalProject(removingProject);
-            setRemovingProject(null);
-          }}
+          onConfirm={() => void removeLocalProject(removingProject)}
         />
       )}
       {customPathOpen && (
@@ -1532,9 +1628,45 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             {error}
           </div>
         )}
+        {pinsError && (
+          <div className="pinned-message" role="alert">
+            <span>Could not load or save pins: {pinsError}</span>
+            <button type="button" className="projects-show-more" disabled={pinsBusy} onClick={() => void requestPins()}>Reload pins</button>
+          </div>
+        )}
+        {visiblePins.length > 0 && (
+          <section className="pinned-section" aria-label="Pinned">
+            <div className="projects-heading">
+              <button type="button" className="projects-heading-label" onClick={() => setPinsOpen((open) => !open)} aria-expanded={pinsOpen}>
+                <span>Pinned</span>
+                <svg className={pinsOpen ? "is-open" : ""} width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="4 2.5 8 6 4 9.5" />
+                </svg>
+              </button>
+            </div>
+            {pinsOpen && visiblePins.map(({ pin, session, label }) => session ? (
+              <SessionItem
+                key={`${pin.type}:${pin.id}`}
+                session={session}
+                isSelected={session.id === selectedSessionId}
+                isRunning={runningSessionIds.has(session.id)}
+                isUnread={unreadSessionIds.has(session.id)}
+                isPinned
+                pinDisabled={pinsBusy}
+                onTogglePin={() => toggleSessionPin(session.id)}
+                projectLabel={label}
+                onClick={() => handleSelectSessionFromList(session)}
+                onRenamed={loadSessions}
+                onDeleted={handleSessionDeleted}
+              />
+            ) : (
+              renderProjectGroup(projectGroups.find((group) => projectPathKey(group.root) === projectPathKey(pin.id)) ?? { root: pin.id, sessions: [], roots: [] })
+            ))}
+          </section>
+        )}
         {!loading && !error && (
           <div className="projects-heading">
-            {projectGroups.length === 0 ? (
+            {unpinnedProjectGroups.length === 0 ? (
               <span className="projects-heading-empty">Projects</span>
             ) : (
               <button
@@ -1552,88 +1684,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             <button type="button" onClick={handleCustomPathClick} className="projects-add" aria-label="New project">+</button>
           </div>
         )}
-        {projectsOpen && visibleProjectGroups.map((group) => {
-          const roots = group.roots;
-          const expanded = expandedProjectIds.has(group.root);
-          let visibleRoots = expanded ? roots : roots.slice(0, 5);
-
-          if (!expanded && selectedSessionId) {
-            const sessionsById = new Map(group.sessions.map((session) => [session.id, session]));
-            let selectedRootId = selectedSessionId;
-            let parentId = sessionsById.get(selectedRootId)?.parentSessionId;
-            while (parentId && sessionsById.has(parentId)) {
-              selectedRootId = parentId;
-              parentId = sessionsById.get(parentId)?.parentSessionId;
-            }
-            const selectedRoot = roots.find((node) => node.session.id === selectedRootId);
-            if (selectedRoot && !visibleRoots.includes(selectedRoot)) {
-              visibleRoots = [...visibleRoots.slice(0, 4), selectedRoot];
-            }
-          }
-
-          const label = projectLabels[group.root] || projectDefaultLabel(group.root);
-          const isPinned = pinnedProjects.has(group.root);
-          const isActive = !selectedSessionId && highlightedProjectRoot === group.root;
-          return (
-            <section className="project-section" key={group.root}>
-              <div className={`project-row${isActive ? " is-active" : ""}`}>
-                <button type="button" className="project-row-main" onClick={() => { setSelectedCwd(group.root); setHighlightedProjectRoot(null); }} aria-current={isActive ? "true" : undefined}>
-                  <FolderIcon size={16} />
-                  <span className="project-row-label">{label}</span>
-                  {isPinned && <svg className="project-pin-indicator" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-label="Pinned"><path d="m14 4 6 6-4 1-4 4-1 5-3-3-3-3 5-1 4-4Z" /></svg>}
-                </button>
-                <SidebarMoreMenu label={`Actions for ${label}`}>
-                  <button type="button" role="menuitem" onClick={() => toggleProjectPin(group.root)}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14 4 6 6-4 1-4 4-1 5-3-3-3-3 5-1 4-4Z" /></svg>
-                    <span>{isPinned ? "Unpin" : "Pin"}</span>
-                  </button>
-                  <button type="button" role="menuitem" onClick={() => setEditingProject(group.root)}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" /></svg>
-                    <span>Edit</span>
-                  </button>
-                  <button type="button" role="menuitem" className="is-danger" onClick={() => setRemovingProject(group.root)}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="m19 6-1 14H6L5 6" /><path d="M10 11v5M14 11v5" /></svg>
-                    <span>Remove</span>
-                  </button>
-                </SidebarMoreMenu>
-                <button type="button" className="project-new-task" onClick={() => createNewSession(group.root)} aria-label={`New task in ${label}`}>
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
-                </button>
-              </div>
-              <div className="project-sessions">
-                {visibleRoots.map((node) => (
-                  <SessionTreeItem
-                    key={node.session.id}
-                    node={node}
-                    selectedSessionId={selectedSessionId}
-                    runningSessionIds={runningSessionIds}
-                    unreadSessionIds={unreadSessionIds}
-                    onSelectSession={handleSelectSessionFromList}
-                    onRenamed={loadSessions}
-                    onSessionDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }}
-                    depth={0}
-                  />
-                ))}
-                {roots.length > 5 && (
-                  <button type="button" className="project-show-more" onClick={() => setExpandedProjectIds((previous) => {
-                    const next = new Set(previous);
-                    if (expanded) next.delete(group.root); else next.add(group.root);
-                    return next;
-                  })}>
-                    {expanded ? "Show less" : "Show more"}
-                  </button>
-                )}
-              </div>
-            </section>
-          );
-        })}
-        {projectsOpen && !normalizedSessionSearch && projectGroups.length > 5 && (
+        {projectsOpen && visibleProjectGroups.map(renderProjectGroup)}
+        {projectsOpen && !normalizedSessionSearch && unpinnedProjectGroups.length > 5 && (
           <button
             type="button"
             className="projects-show-more"
             onClick={() => setAllProjectsVisible((visible) => !visible)}
           >
-            {allProjectsVisible ? "Show fewer projects" : `Show ${projectGroups.length - 5} more projects`}
+            {allProjectsVisible ? "Show fewer projects" : `Show ${unpinnedProjectGroups.length - 5} more projects`}
           </button>
         )}
       </div>
@@ -1650,6 +1708,9 @@ function SessionTreeItem({
   onSelectSession,
   onRenamed,
   onSessionDeleted,
+  pinnedSessionIds,
+  onTogglePin,
+  pinDisabled,
   depth,
 }: {
   node: SessionTreeNode;
@@ -1659,6 +1720,9 @@ function SessionTreeItem({
   onSelectSession: (s: SessionInfo) => void;
   onRenamed?: () => void;
   onSessionDeleted?: (id: string) => void;
+  pinnedSessionIds: Set<string>;
+  onTogglePin: (id: string) => void;
+  pinDisabled: boolean;
   depth: number;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -1686,6 +1750,9 @@ function SessionTreeItem({
           onClick={() => onSelectSession(node.session)}
           onRenamed={onRenamed}
           onDeleted={(id) => onSessionDeleted?.(id)}
+          isPinned={pinnedSessionIds.has(node.session.id)}
+          onTogglePin={() => onTogglePin(node.session.id)}
+          pinDisabled={pinDisabled}
           depth={depth}
           hasChildren={hasChildren}
           collapsed={collapsed}
@@ -1704,6 +1771,9 @@ function SessionTreeItem({
               onSelectSession={onSelectSession}
               onRenamed={onRenamed}
               onSessionDeleted={onSessionDeleted}
+              pinnedSessionIds={pinnedSessionIds}
+              onTogglePin={onTogglePin}
+              pinDisabled={pinDisabled}
               depth={depth + 1}
             />
           ))}
@@ -1784,6 +1854,10 @@ function SessionItem({
   onClick,
   onRenamed,
   onDeleted,
+  isPinned = false,
+  onTogglePin,
+  pinDisabled,
+  projectLabel,
   depth = 0,
   hasChildren = false,
   collapsed = false,
@@ -1796,6 +1870,10 @@ function SessionItem({
   onClick: () => void;
   onRenamed?: () => void;
   onDeleted?: (id: string) => void;
+  isPinned?: boolean;
+  onTogglePin: () => void;
+  pinDisabled?: boolean;
+  projectLabel?: string;
   depth?: number;
   hasChildren?: boolean;
   collapsed?: boolean;
@@ -1837,7 +1915,8 @@ function SessionItem({
     setConfirmDelete(false);
     setDeleting(true);
     try {
-      await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+      const response = await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       onDeleted?.(session.id);
     } catch {
       setDeleting(false);
@@ -1945,6 +2024,11 @@ function SessionItem({
       ) : (
         /* ── Normal view ── */
         <>
+          {projectLabel !== undefined && (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="pinned-thread-icon" aria-hidden="true">
+              <path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z" />
+            </svg>
+          )}
           {/* Fork indicator for child sessions */}
           {depth > 0 && (
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
@@ -1970,6 +2054,7 @@ function SessionItem({
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
                 {title}
               </span>
+              {projectLabel !== undefined && <span className="pinned-session-project" title={session.cwd}>{projectLabel}</span>}
             </div>
             {session.worktreeBranch && (
               <div className="session-worktree-meta" style={{ marginTop: 2, display: "flex", alignItems: "center", color: "var(--accent)", fontSize: 11, minWidth: 0 }}>
@@ -2010,6 +2095,10 @@ function SessionItem({
 
           {/* One quiet entry point keeps row actions from competing with titles. */}
           <SidebarMoreMenu label={`Actions for ${title}`}>
+            <button type="button" role="menuitem" disabled={pinDisabled} onClick={onTogglePin}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14 4 6 6-4 1-4 4-1 5-3-3-3-3 5-1 4-4Z" /></svg>
+              <span>{isPinned ? "Unpin" : "Pin"}</span>
+            </button>
             <button type="button" role="menuitem" onClick={startRename}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />

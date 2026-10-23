@@ -990,6 +990,32 @@ span.linenumber {
   background: var(--bg-hover);
 }
 
+.pinned-section {
+  margin-bottom: 12px;
+}
+
+.pinned-message {
+  padding: 4px 6px 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.pinned-message[role="alert"] { color: #ef4444; }
+.pinned-thread-icon { flex-shrink: 0; color: var(--text-muted); }
+
+.pinned-session-project {
+  min-width: 0;
+  max-width: 38%;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
 .project-section {
   margin: 1px 0 2px;
 }
@@ -1168,6 +1194,11 @@ span.linenumber {
 .sidebar-action-popover button:focus-visible {
   outline: none;
   background: var(--bg-hover);
+}
+
+.sidebar-action-popover button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .sidebar-action-popover button.is-danger { color: #dc2626; }

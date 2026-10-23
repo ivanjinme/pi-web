@@ -4,6 +4,7 @@ import { allowFileRoot, replaceAllowedFileRoot } from "@/lib/allowed-roots";
 import { hasBusyRpcSessionForCwds, destroyRpcSessionsForCwds } from "@/lib/rpc-manager";
 import { invalidateSessionListCache, listAllSessions } from "@/lib/session-reader";
 import { sessionPathKey } from "@/lib/session-path";
+import { rebindPinnedProject } from "@/lib/sidebar-pins";
 import { invalidateProjectCache } from "@/lib/worktree";
 import { isApiRequestAllowed } from "@/lib/request-security";
 
@@ -77,6 +78,7 @@ export async function POST(request: NextRequest) {
         writeFileSync(item.path, item.updated, "utf8");
         written.push(item);
       }
+      rebindPinnedProject(oldRoot, newRoot);
     } catch (error) {
       for (const item of written) {
         try { writeFileSync(item.path, item.source, "utf8"); } catch { /* best-effort rollback */ }
