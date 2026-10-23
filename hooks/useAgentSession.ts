@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo, useReducer } from "react";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type {
   AgentMessage,
   ExtensionStatusItem,
@@ -12,6 +13,7 @@ import type {
 } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
 import { sendAgentCommand } from "@/lib/agent-client";
+import { resolveThinkingLevel } from "@/lib/thinking-level";
 import type { CompactCommandResult, QueuedMessages, SlashCommandInfo } from "@/lib/agent/protocol/commands";
 export type { QueuedMessages, SlashCommandInfo } from "@/lib/agent/protocol/commands";
 import type { SessionStatsInfo } from "@/lib/pi-types";
@@ -101,7 +103,7 @@ export interface UseAgentSessionOptions {
   setToolPreset?: (preset: "none" | "default" | "full") => void;
 }
 
-export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export type ThinkingLevelOption = ThinkingLevel;
 
 const PROMPT_SETTLE_INITIAL_DELAY_MS = 800;
 const PROMPT_SETTLE_POLL_MS = 600;
@@ -169,8 +171,7 @@ type ModelsResponse = {
   models: Record<string, string>;
   modelList?: ModelEntry[];
   defaultModel?: SelectedModel | null;
-  thinkingLevels?: Record<string, string[]>;
-  thinkingLevelMaps?: Record<string, Record<string, string | null>>;
+  thinkingLevels?: Record<string, ThinkingLevel[]>;
   modelError?: string;
 };
 
@@ -195,12 +196,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [modelNames, setModelNames] = useState<Record<string, string>>({});
   const [modelList, setModelList] = useState<ModelEntry[]>([]);
   const [modelError, setModelError] = useState<string | null>(null);
-  const [modelThinkingLevels, setModelThinkingLevels] = useState<Record<string, string[]>>({});
-  const [modelThinkingLevelMaps, setModelThinkingLevelMaps] = useState<Record<string, Record<string, string | null>>>({});
+  const [modelThinkingLevels, setModelThinkingLevels] = useState<Record<string, ThinkingLevel[]>>({});
   const [newSessionModel, setNewSessionModel] = useState<SelectedModel | null>(null);
   const [newSessionDefaultModel, setNewSessionDefaultModel] = useState<SelectedModel | null>(null);
   const [toolPreset, setToolPreset] = useState<"none" | "default" | "full">("default");
-  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevelOption>("auto");
+  const [requestedThinkingLevel, setThinkingLevel] = useState<ThinkingLevelOption | null>(isNew ? "medium" : null);
   const [retryInfo, setRetryInfo] = useState<{ attempt: number; maxAttempts: number; errorMessage?: string } | null>(null);
   const [contextUsage, setContextUsage] = useState<{ percent: number | null; contextWindow: number; tokens: number | null } | null>(null);
   const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
@@ -255,6 +255,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const currentModel = currentModelOverride ?? data?.context.model ?? pendingModel ?? null;
   const displayModel = isNew ? (newSessionModel ?? newSessionDefaultModel) : currentModel;
+  const thinkingLevel = isNew
+    ? resolveThinkingLevel(requestedThinkingLevel, displayModel ? modelThinkingLevels[`${displayModel.provider}:${displayModel.modelId}`] : undefined)
+    : requestedThinkingLevel;
 
   const sessionStats = useMemo(() => {
     const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
@@ -318,7 +321,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setEntryIds(d.context.entryIds ?? []);
       setCurrentModelOverride(null);
       setError(null);
-      if (d.context.thinkingLevel && d.context.thinkingLevel !== "off") {
+      if (d.context.thinkingLevel) {
         setThinkingLevel(d.context.thinkingLevel as ThinkingLevelOption);
       }
 
@@ -336,7 +339,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (liveState) {
           if (liveState.contextUsage !== undefined) setContextUsage(liveState.contextUsage ?? null);
           if (liveState.systemPrompt !== undefined) setSystemPrompt(liveState.systemPrompt ?? null);
-          if (liveState.thinkingLevel !== undefined) setThinkingLevel((liveState.thinkingLevel as ThinkingLevelOption) ?? "auto");
+          if (liveState.thinkingLevel !== undefined) setThinkingLevel((liveState.thinkingLevel as ThinkingLevelOption) ?? null);
           if (liveState.extensionStatuses !== undefined) setExtensionStatuses(liveState.extensionStatuses ?? []);
           if (liveState.extensionWidgets !== undefined) setExtensionWidgets(liveState.extensionWidgets ?? []);
           if (liveState.queuedMessages !== undefined) setQueuedMessages(normalizeQueuedMessages(liveState.queuedMessages));
@@ -417,7 +420,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           type: "ensure_session",
           toolPreset,
           ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
-          ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
+          ...(thinkingLevel !== null ? { thinkingLevel } : {}),
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -951,7 +954,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           if (selectedModel) {
             setPendingModel(selectedModel);
             if (existingSid) {
+              // 发送前确认模型，避免抢在异步模型切换完成前发送；SDK 会重置推理档位。
               await sendAgentCommand(sid, { type: "set_model", provider: selectedModel.provider, modelId: selectedModel.modelId });
+              if (thinkingLevel !== null) await sendAgentCommand(sid, { type: "set_thinking_level", level: thinkingLevel });
             }
           }
           await ensureEventsConnected(sid);
@@ -991,7 +996,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       return false;
     }
     return true;
-  }, [isNew, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, resolveNewSessionCwd]);
+  }, [isNew, newSessionModel, thinkingLevel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, resolveNewSessionCwd]);
 
   const executeBash = useCallback(async (command: string, excludeFromContext: boolean) => {
     if (agentRunningRef.current || bashRunningRef.current) return;
@@ -1133,6 +1138,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (!sid) return;
       try {
         await sendAgentCommand(sid, { type: "set_model", provider, modelId });
+        const level = resolveThinkingLevel(requestedThinkingLevel, modelThinkingLevels[`${provider}:${modelId}`]);
+        if (level !== null) await sendAgentCommand(sid, { type: "set_thinking_level", level });
       } catch (e) {
         console.error("Failed to set model:", e);
       }
@@ -1146,7 +1153,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (e) {
       console.error("Failed to set model:", e);
     }
-  }, [isNew, setNewSessionModel]);
+  }, [isNew, setNewSessionModel, requestedThinkingLevel, modelThinkingLevels]);
 
   const loadModels = useCallback(async (signal?: AbortSignal) => {
     const modelCwd = newSessionCwd ?? session?.cwd ?? "";
@@ -1157,7 +1164,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     setModelNames(d.models);
     setModelError(d.modelError ?? null);
     setModelThinkingLevels(d.thinkingLevels ?? {});
-    setModelThinkingLevelMaps(d.thinkingLevelMaps ?? {});
     const nextModelList = d.modelList ?? [];
     setModelList(nextModelList);
     if (isNew) {
@@ -1332,7 +1338,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const handleThinkingLevelChange = useCallback(async (level: ThinkingLevelOption) => {
     setThinkingLevel(level);
-    if (level === "auto") return; // "auto" leaves pi's current setting untouched
     const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
     if (!sid) return;
     try {
@@ -1382,7 +1387,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           if (agentState.state.isCompacting !== undefined) updateCompacting(agentState.state.isCompacting);
           if (agentState.state.contextUsage !== undefined) setContextUsage(agentState.state.contextUsage ?? null);
           if (agentState.state.systemPrompt !== undefined) setSystemPrompt(agentState.state.systemPrompt ?? null);
-          if (agentState.state.thinkingLevel !== undefined) setThinkingLevel((agentState.state.thinkingLevel as ThinkingLevelOption) ?? "auto");
+          if (agentState.state.thinkingLevel !== undefined) setThinkingLevel((agentState.state.thinkingLevel as ThinkingLevelOption) ?? null);
           if (agentState.state.extensionStatuses !== undefined) setExtensionStatuses(agentState.state.extensionStatuses ?? []);
           if (agentState.state.extensionWidgets !== undefined) setExtensionWidgets(agentState.state.extensionWidgets ?? []);
           if (agentState.state.queuedMessages !== undefined) setQueuedMessages(normalizeQueuedMessages(agentState.state.queuedMessages));
@@ -1442,7 +1447,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   return {
     // State
     data, loading, error, activeLeafId, messages, entryIds, streamState,
-    agentRunning, modelNames, modelList, modelError, modelThinkingLevels, modelThinkingLevelMaps, newSessionModel, toolPreset, thinkingLevel,
+    agentRunning, modelNames, modelList, modelError, modelThinkingLevels, newSessionModel, toolPreset, thinkingLevel,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactResult, currentModel, displayModel, sessionStats,
     slashCommands, slashCommandsLoading, queuedMessages,

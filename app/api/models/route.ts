@@ -46,7 +46,6 @@ async function loadModels(cwd: string): Promise<ModelsData> {
   let modelList: { id: string; name: string; provider: string }[] = [];
   let defaultModel: { provider: string; modelId: string } | null = null;
   const thinkingLevels: Record<string, string[]> = {};
-  const thinkingLevelMaps: Record<string, Record<string, string | null>> = {};
 
   const agentDir = getAgentDir();
   // Gate untrusted project extensions: enumerating models still imports and
@@ -72,7 +71,6 @@ async function loadModels(cwd: string): Promise<ModelsData> {
     const key = `${m.provider}:${m.id}`;
     nameMap.set(key, m.name);
     thinkingLevels[key] = getSupportedThinkingLevels(m);
-    if (m.thinkingLevelMap) thinkingLevelMaps[key] = m.thinkingLevelMap;
   }
 
   const provider = settings.getDefaultProvider();
@@ -82,7 +80,7 @@ async function loadModels(cwd: string): Promise<ModelsData> {
   }
 
   return withModelRuntimeError(
-    { models: Object.fromEntries(nameMap), modelList, defaultModel, thinkingLevels, thinkingLevelMaps },
+    { models: Object.fromEntries(nameMap), modelList, defaultModel, thinkingLevels },
     modelError,
   );
 }
@@ -92,7 +90,6 @@ const EMPTY_MODELS: ModelsData = {
   modelList: [],
   defaultModel: null,
   thinkingLevels: {},
-  thinkingLevelMaps: {},
 };
 
 export async function GET(req: Request) {

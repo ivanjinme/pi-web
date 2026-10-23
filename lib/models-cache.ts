@@ -3,7 +3,6 @@ export interface ModelsData {
   modelList: { id: string; name: string; provider: string }[];
   defaultModel: { provider: string; modelId: string } | null;
   thinkingLevels: Record<string, string[]>;
-  thinkingLevelMaps: Record<string, Record<string, string | null>>;
   modelError?: string;
 }
 

@@ -65,10 +65,13 @@ type ExtensionBindingOptions = {
 
 const PROGRESS_UPDATE_INSTRUCTION = "You must always start with an intermediary update before any content in the analysis channel if the task will require calling tools. The user update should acknowledge the request and explain your first step.";
 
-// Web UI 不输出终端样式；为上游新增颜色 token 提供空值默认值。
-const PLAIN_TEXT_COLORS = new Proxy({} as Record<string, string>, {
-  get: (colors, key) => typeof key === "string" ? (colors[key] ?? "") : undefined,
-});
+// Theme 构造时会展开颜色对象，必须显式提供可选 token 的回退源。
+const PLAIN_TEXT_COLORS: Record<string, string> = {
+  muted: "",
+  text: "",
+  selectedBg: "",
+  thinkingXhigh: "",
+};
 
 class PlainTextTheme extends Theme {
   constructor() {
@@ -79,6 +82,7 @@ class PlainTextTheme extends Theme {
     );
   }
 
+  override style(text: string): string { return text; }
   override fg(...[, text]: Parameters<Theme["fg"]>): string { return text; }
   override bg(...[, text]: Parameters<Theme["bg"]>): string { return text; }
   override bold(text: string): string { return text; }
