@@ -6,7 +6,7 @@ import ts from "typescript";
 import { runInNewContext } from "node:vm";
 
 const jiti = createJiti(import.meta.url);
-const { visibleThreadRoots, needsSessionTitle, applySessionTitle } = await jiti.import("../lib/sidebar-session-list.ts");
+const { visibleThreadRoots } = await jiti.import("../lib/sidebar-session-list.ts");
 
 const source = await readFile(new URL("./SessionSidebar.tsx", import.meta.url), "utf8");
 const sessionItemSource = source.slice(source.indexOf("function SessionItem("));
@@ -62,8 +62,6 @@ function titleLoaderHarness(fetch) {
     projectGroups: [], projectVisibleCounts: {}, selectedSessionId: null,
     sseAuthoritativeRef: { current: true },
     setRunningSessionIds() {}, setUnreadSessionIds() {},
-    needsSessionTitle: (session, includeFirstMessage) => needsSessionTitle(session, includeFirstMessage),
-    applySessionTitle: (session, title, includeFirstMessage) => applySessionTitle(session, title, includeFirstMessage),
   });
   let current;
   function flush() {
@@ -103,7 +101,7 @@ function historyGroup() {
 test("identical successful catalog refresh retries failed titles without looping or discarding cached titles", async () => {
   let titleRequests = 0;
   let failTitles = true;
-  const catalog = [{ id: "thread", modified: "revision", cwd: "/project", titleLoaded: false, firstMessageLoaded: false }];
+  const catalog = [{ id: "thread", modified: "revision", cwd: "/project", titleLoaded: false }];
   const harness = titleLoaderHarness(async (_url, options) => {
     if (options?.method === "POST") {
       titleRequests++;
@@ -129,6 +127,34 @@ test("identical successful catalog refresh retries failed titles without looping
   await harness.settle();
   assert.equal(titleRequests, 3, "loaded titles remain cached across identical catalogs");
   assert.equal(harness.current.allSessions[0].name, "Recovered title");
+});
+
+test("search loads only missing titles and reuses already loaded display titles", async () => {
+  const requests = [];
+  const catalog = [
+    { id: "loaded", modified: "revision", name: "Cached title", firstMessage: "original prompt", titleLoaded: true },
+    { id: "missing", modified: "revision", firstMessage: "", titleLoaded: false },
+  ];
+  const harness = titleLoaderHarness(async (_url, options) => {
+    if (options?.method === "POST") {
+      requests.push(JSON.parse(options.body));
+      return { ok: true, json: async () => ({ titles: [{ id: "missing", name: "Loaded title", firstMessage: "" }] }) };
+    }
+    return { ok: true, json: async () => ({ sessions: catalog }) };
+  });
+  await harness.current.loadSessions();
+  await harness.settle();
+  assert.deepEqual(requests, [{ ids: ["missing"] }]);
+  assert.equal(harness.current.allSessions[0].name, "Cached title");
+  assert.equal(harness.current.allSessions[1].name, "Loaded title");
+  await harness.current.loadSessions();
+  await harness.settle();
+  assert.equal(requests.length, 1);
+});
+
+test("pinned and project session search share the displayed title with each row", () => {
+  assert.equal(source.match(/!sessionDisplayTitle\(session\)\.toLowerCase\(\)\.includes\(normalizedSessionSearch\)/g)?.length, 2);
+  assert.match(sessionItemSource, /const title = session\.titleLoaded === false \? "…" : sessionDisplayTitle\(session\);/);
 });
 
 test("a superseded title response cannot overwrite the refreshed catalog", async () => {

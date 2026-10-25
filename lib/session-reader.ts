@@ -116,10 +116,10 @@ function getPathToIdCache(): Map<string, string> {
   return globalThis.__piPathToSessionIdCache;
 }
 
-export async function loadSessionTitles(ids: string[], includeFirstMessage = false) {
+export async function loadSessionTitles(ids: string[]) {
   const sessions = await listAllSessions();
   const requested = new Set(ids);
-  return readSessionTitles(sessions.filter((session) => requested.has(session.id)), includeFirstMessage);
+  return readSessionTitles(sessions.filter((session) => requested.has(session.id)));
 }
 
 export async function resolveSessionPath(sessionId: string): Promise<string | null> {

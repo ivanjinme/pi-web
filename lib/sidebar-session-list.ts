@@ -1,19 +1,7 @@
 import type { SessionInfo } from "./types";
 
-export function needsSessionTitle(session: SessionInfo, includeFirstMessage: boolean): boolean {
-  return includeFirstMessage ? !session.firstMessageLoaded : !session.titleLoaded;
-}
-
-export function applySessionTitle(
-  session: SessionInfo,
-  title: Pick<SessionInfo, "name" | "firstMessage">,
-  includeFirstMessage: boolean,
-): SessionInfo {
-  return {
-    ...session, ...title, titleLoaded: true,
-    firstMessage: session.firstMessageLoaded && !includeFirstMessage ? session.firstMessage : title.firstMessage,
-    firstMessageLoaded: session.firstMessageLoaded || includeFirstMessage,
-  };
+export function sessionDisplayTitle(session: Pick<SessionInfo, "name" | "firstMessage">): string {
+  return session.name || session.firstMessage.slice(0, 50);
 }
 
 export interface SidebarThreadNode {

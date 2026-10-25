@@ -43,7 +43,9 @@ Browser                Next.js Server              AgentSession (in-process)
 - **Browse:** persisted JSONL; no `AgentSession`. Sidebar discovery reads only
   headers/mtimes; visible thread titles search backward for the latest
   `session_info`, falling back to the first 50 characters of user text.
-  Full transcript parsing via `SessionManager` waits until a thread is opened.
+  Search loads missing titles and matches the displayed title only, not the
+  original prompt or conversation body. Full transcript parsing via
+  `SessionManager` waits until a thread is opened.
 - New Web sessions generate a title in the background after their first
   successful reply, reusing the naming facade once without overwriting a manual
   title. Failures keep the first-message fallback; no persistent title index.

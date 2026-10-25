@@ -3,12 +3,11 @@ import test from "node:test";
 import { createJiti } from "jiti";
 
 let requested = [];
-let includeFirstMessage;
 const jiti = createJiti(import.meta.url, {
   virtualModules: {
     "@/lib/session-reader": {
       listAllSessions: async () => [{ id: "thread", titleLoaded: false }],
-      loadSessionTitles: async (ids, full) => { requested = ids; includeFirstMessage = full; return [{ id: "thread", name: "Title", firstMessage: "" }]; },
+      loadSessionTitles: async (...args) => { requested = args; return [{ id: "thread", name: "Title", firstMessage: "" }]; },
     },
     "@/lib/rpc-manager": { getRunningRpcSessionIds: () => [] },
   },
@@ -24,14 +23,8 @@ test("GET returns only the lightweight catalog", async () => {
 test("POST loads explicit title IDs", async () => {
   const response = await POST(request({ ids: ["thread"] }));
   assert.equal(response.status, 200);
-  assert.deepEqual(requested, ["thread"]);
-  assert.equal(includeFirstMessage, false);
+  assert.deepEqual(requested, [["thread"]]);
   assert.deepEqual(await response.json(), { titles: [{ id: "thread", name: "Title", firstMessage: "" }] });
-});
-
-test("POST explicitly requests search-only full first messages", async () => {
-  assert.equal((await POST(request({ ids: ["thread"], includeFirstMessage: true }))).status, 200);
-  assert.equal(includeFirstMessage, true);
 });
 
 test("POST rejects malformed, non-string and oversized batches", async () => {

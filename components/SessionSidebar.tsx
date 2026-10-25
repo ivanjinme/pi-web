@@ -15,7 +15,7 @@ import {
 import { createPortal } from "react-dom";
 import type { SessionInfo } from "@/lib/types";
 import type { SidebarPin } from "@/lib/sidebar-pins";
-import { applySessionTitle, needsSessionTitle, threadTitleIds, visibleThreadRoots } from "@/lib/sidebar-session-list";
+import { sessionDisplayTitle, threadTitleIds, visibleThreadRoots } from "@/lib/sidebar-session-list";
 import {
   PROJECT_FOLDERS_CHANGED_EVENT,
   forgetProjectFolder,
@@ -709,7 +709,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         return data.sessions.map((session) => {
           const old = byId.get(session.id);
           return old?.modified === session.modified && old.titleLoaded
-            ? { ...session, name: old.name, firstMessage: old.firstMessage, titleLoaded: true, firstMessageLoaded: old.firstMessageLoaded }
+            ? { ...session, name: old.name, firstMessage: old.firstMessage, titleLoaded: true }
             : session;
         });
       });
@@ -1102,8 +1102,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     for (const session of allSessions) {
       const root = session.projectRoot ?? session.cwd;
       if (isProjectFolderHidden(root, hiddenProjectFolders)) continue;
-      if (normalizedSessionSearch && ![session.name, session.firstMessage, session.cwd]
-        .some((value) => value?.toLowerCase().includes(normalizedSessionSearch))) continue;
+      if (normalizedSessionSearch && !sessionDisplayTitle(session).toLowerCase().includes(normalizedSessionSearch)) continue;
 
       const group = groups.get(root);
       if (group) {
@@ -1145,8 +1144,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       }
       const session = sessionsById.get(pin.id);
       if (!session || isProjectFolderHidden(session.projectRoot ?? session.cwd, hiddenProjectFolders)) return [];
-      if (normalizedSessionSearch && ![session.name, session.firstMessage, session.cwd]
-        .some((value) => value?.toLowerCase().includes(normalizedSessionSearch))) return [];
+      if (normalizedSessionSearch && !sessionDisplayTitle(session).toLowerCase().includes(normalizedSessionSearch)) return [];
       const root = session.projectRoot ?? session.cwd;
       return [{ pin, session, label: projectLabels[root] || projectDefaultLabel(root) }];
     });
@@ -1183,13 +1181,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         for (const id of threadTitleIds(roots)) ids.add(id);
       }
     }
-    const includeFirstMessage = Boolean(normalizedSessionSearch);
-    return allSessions.filter((session) => ids.has(session.id) && needsSessionTitle(session, includeFirstMessage))
-      .map(({ id, modified }) => ({ id, modified, includeFirstMessage }));
+    return allSessions.filter((session) => ids.has(session.id) && !session.titleLoaded)
+      .map(({ id, modified }) => ({ id, modified }));
   }, [allSessions, normalizedSessionSearch, projectsOpen, visibleProjectGroups, pinsOpen, visiblePins, projectGroups, projectVisibleCounts, selectedSessionId]));
 
   useEffect(() => {
-    const requested = JSON.parse(titleRequestKey) as { id: string; modified: string; includeFirstMessage: boolean }[];
+    const requested = JSON.parse(titleRequestKey) as { id: string; modified: string }[];
     if (!requested.length) return;
     const controller = new AbortController();
     const load = async () => {
@@ -1200,7 +1197,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             ids: requested.slice(offset, offset + 100).map(({ id }) => id),
-            includeFirstMessage: requested[0].includeFirstMessage,
           }),
           signal: controller.signal,
         });
@@ -1214,7 +1210,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       setAllSessions((sessions) => sessions.map((session) => {
         const title = byId.get(session.id);
         return title && session.modified === revisions.get(session.id)
-          ? applySessionTitle(session, title, requested[0].includeFirstMessage) : session;
+          ? { ...session, ...title, titleLoaded: true } : session;
       }));
     };
     void load().catch((error) => {
@@ -1949,7 +1945,7 @@ function SessionItem({
   const [deleting, setDeleting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const title = session.titleLoaded === false ? "…" : session.name || session.firstMessage.slice(0, 50);
+  const title = session.titleLoaded === false ? "…" : sessionDisplayTitle(session);
 
   const startRename = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();

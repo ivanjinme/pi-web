@@ -15,8 +15,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "ids must contain at most 100 session IDs" }, { status: 400 });
   }
   try {
-    const includeFirstMessage = (body as { includeFirstMessage?: unknown }).includeFirstMessage === true;
-    return NextResponse.json({ titles: await loadSessionTitles(ids, includeFirstMessage) });
+    return NextResponse.json({ titles: await loadSessionTitles(ids) });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }

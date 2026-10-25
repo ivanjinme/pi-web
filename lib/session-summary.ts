@@ -172,11 +172,6 @@ export async function readSessionTitle(path: string): Promise<SessionTitle> {
     await file.close();
   }
 
-  return { firstMessage: (await readSessionFirstMessage(path)).slice(0, 50) };
-}
-
-// 搜索只读取首条用户文本，不构建完整 transcript。
-export async function readSessionFirstMessage(path: string): Promise<string> {
   const input = createReadStream(path, { encoding: "utf8" });
   const lines = createInterface({ input, crlfDelay: Infinity });
   try {
@@ -189,20 +184,19 @@ export async function readSessionFirstMessage(path: string): Promise<string> {
       const content = message.content;
       const text = typeof content === "string" ? content
         : content?.filter((block) => block.type === "text").map((block) => block.text).join(" ");
-      if (text) return text;
+      if (text) return { firstMessage: text.slice(0, 50) };
     }
-    return "(no messages)";
+    return { firstMessage: "(no messages)" };
   } finally {
     lines.close();
     input.destroy();
   }
 }
 
-export async function readSessionTitles(files: { id: string; path: string }[], includeFirstMessage = false): Promise<(SessionTitle & { id: string })[]> {
+export async function readSessionTitles(files: { id: string; path: string }[]): Promise<(SessionTitle & { id: string })[]> {
   const titles = await mapLimited(files, 10, async ({ id, path }) => {
     try {
-      const title = await readSessionTitle(path);
-      return { id, ...title, ...(includeFirstMessage ? { firstMessage: await readSessionFirstMessage(path) } : {}) };
+      return { id, ...await readSessionTitle(path) };
     } catch (error) {
       if (isMissing(error)) return null;
       throw error;
