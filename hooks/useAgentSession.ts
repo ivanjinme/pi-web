@@ -27,6 +27,7 @@ import {
 export interface SessionData {
   sessionId: string;
   filePath: string;
+  info?: SessionInfo | null;
   tree: SessionTreeNode[];
   leafId: string | null;
   context: {
@@ -285,7 +286,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     return {
       sessionFile: data?.filePath || undefined,
       sessionId: sessionIdRef.current ?? session?.id ?? "",
-      sessionName: session?.name,
+      sessionName: session?.name ?? data?.info?.name,
       userMessages,
       assistantMessages,
       toolCalls,
@@ -295,7 +296,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       cost,
       ...(contextUsage ? { contextUsage } : {}),
     } satisfies SessionStatsInfo;
-  }, [messages, contextUsage, data?.filePath, session?.id, session?.name]);
+  }, [messages, contextUsage, data?.filePath, data?.info?.name, session?.id, session?.name]);
 
   const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false) => {
     let messagesLoaded = false;
@@ -754,6 +755,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           setAgentPhase({ kind: "waiting_model" });
         }
         break;
+      case "session_info_changed":
+        onSessionRenamed?.(typeof event.name === "string" ? event.name : "");
+        break;
       case "agent_start":
         agentRunningRef.current = true;
         setAgentRunning(true);
@@ -890,7 +894,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         handleExtensionUiRequest(event as ExtensionUiRequest);
         break;
     }
-  }, [addNotice, finishPromptWithoutStream, handleExtensionUiRequest, loadSession, onAgentEnd, updateCompacting]);
+  }, [addNotice, finishPromptWithoutStream, handleExtensionUiRequest, loadSession, onAgentEnd, onSessionRenamed, updateCompacting]);
   handleAgentEventRef.current = handleAgentEvent;
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {

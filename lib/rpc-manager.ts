@@ -167,10 +167,12 @@ export class AgentSessionWrapper {
   private sessionShutdownEmitted = false;
   private forceShutdownOnIdle = false;
   private _alive = true;
+  private replySucceeded = false;
 
   constructor(
     public readonly inner: AgentSessionLike,
     private readonly shellAvailability: ShellAvailability,
+    private autoNameOnFirstReply = false,
   ) {}
 
   get sessionId(): string {
@@ -203,6 +205,12 @@ export class AgentSessionWrapper {
 
   start(): void {
     this.unsubscribe = this.inner.subscribe((event: AgentEvent) => {
+      if (event.type === "message_end") {
+        const message = event.message as { role?: string; stopReason?: string } | undefined;
+        if (message?.role === "assistant") {
+          this.replySucceeded = message.stopReason === "stop" || message.stopReason === "length";
+        }
+      }
       if (event.type === "agent_end") {
         invalidateSessionListCache();
         this.resetIdleTimer();
@@ -412,6 +420,7 @@ export class AgentSessionWrapper {
         const promptImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
         const streamingBehavior = command.streamingBehavior as "steer" | "followUp" | undefined;
         this.promptRunning = true;
+        this.replySucceeded = false;
         // Make the new thread discoverable before returning from the prompt
         // request. Otherwise Pi's deferred first-assistant flush means the
         // sidebar cannot list it until the whole run completes.
@@ -427,6 +436,13 @@ export class AgentSessionWrapper {
           this.resetIdleTimer();
           if (!streamingBehavior) this.emit({ type: "prompt_done" });
           notifyRunningChange();
+          if (this.autoNameOnFirstReply && this.replySucceeded) {
+            this.autoNameOnFirstReply = false;
+            // 复用命名操作，后台执行；失败保留首条消息标题，不重试。
+            void autoNameRpcSession(this, true).catch((error) => {
+              console.warn("[pi-web] automatic session title failed:", error instanceof Error ? error.message : error);
+            });
+          }
         }).catch((error) => {
           this.promptRunning = false;
           this.resetIdleTimer();
@@ -590,8 +606,8 @@ export class AgentSessionWrapper {
       }
 
       case "set_session_name": {
-        const name = (command.name as string | undefined)?.trim();
-        if (!name) throw new Error("Session name cannot be empty");
+        if (typeof command.name !== "string") throw new Error("Session name must be a string");
+        const name = command.name.trim();
         this.inner.setSessionName(name);
         invalidateSessionListCache();
         return null;
@@ -1135,11 +1151,13 @@ export class AgentSessionWrapper {
 }
 
 // 自动命名保留在 facade，HTTP route 不接触 SDK session。
-export async function autoNameRpcSession(session: AgentSessionWrapper) {
+export async function autoNameRpcSession(session: AgentSessionWrapper, onlyIfUnnamed = false) {
   // 热更新后 globalThis 中可能仍有旧 wrapper，沿用原有 readiness 兼容。
   await session.waitUntilReady?.();
+  const hasTitleRecord = () => session.inner.sessionManager.getEntries().some((entry) => entry.type === "session_info");
+  if (!session.isAlive() || (onlyIfUnnamed && hasTitleRecord())) return null;
   const result = await generateSessionTitle(session.inner as unknown as Pick<AgentSession, "agent">);
-  if (!session.isAlive()) return null;
+  if (!session.isAlive() || (onlyIfUnnamed && hasTitleRecord())) return null;
   session.inner.setSessionName(result.title);
   invalidateSessionListCache();
   return result;
@@ -1342,7 +1360,7 @@ export async function startRpcSession(
       ...(toolsOption !== undefined ? { tools: toolsOption } : {}),
     });
 
-    const wrapper = new AgentSessionWrapper(inner, shellAvailability);
+    const wrapper = new AgentSessionWrapper(inner, shellAvailability, !sessionFile);
     if (toolPreset !== undefined) {
       wrapper.setToolPreset(toolPreset);
     } else if (toolNames !== undefined) {

@@ -310,8 +310,12 @@ export interface SessionInfo {
   name?: string;
   created: string;
   modified: string;
-  messageCount: number;
+  messageCount?: number;
   firstMessage: string;
+  /** 列表先返回轻量目录，仅可见 thread 再加载标题。 */
+  titleLoaded?: boolean;
+  /** 搜索已加载完整首条用户文本，不能由轻量标题响应标记。 */
+  firstMessageLoaded?: boolean;
   parentSessionId?: string; // set if this session was forked from another
   /** Main repo root shared by all worktrees of this cwd (cwd itself for non-git dirs).
    *  Always set by the server; optional because the client builds transient

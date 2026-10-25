@@ -3,10 +3,11 @@ import {
   buildSessionContext as piBuildSessionContext,
   getAgentDir,
 } from "@earendil-works/pi-coding-agent";
-import { closeSync, openSync, readSync } from "fs";
-import { normalize as normalizePath } from "path";
-import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
-import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
+import { join, normalize as normalizePath } from "path";
+import { discoverSessionFiles, readSessionTitles } from "./session-summary";
+export { readSessionHeader } from "./session-summary";
+import type { AgentMessage, SessionEntry, SessionInfo, SessionContext } from "./types";
+import type { SessionEntry as PiSessionEntry } from "@earendil-works/pi-coding-agent";
 import { normalizeToolCalls } from "./normalize";
 import { sessionPathKey } from "./session-path";
 import { resolveProject, type ProjectInfo } from "./worktree";
@@ -14,32 +15,30 @@ import { resolveProject, type ProjectInfo } from "./worktree";
 export { getAgentDir };
 
 async function loadAllSessions(): Promise<SessionInfo[]> {
-  const piSessions: PiSessionInfo[] = await SessionManager.listAll();
-  const pathToId = new Map<string, string>();
-  for (const s of piSessions) pathToId.set(sessionPathKey(s.path), s.id);
+  const files = await discoverSessionFiles(join(getAgentDir(), "sessions"));
+  const pathToId = new Map(files.map((file) => [sessionPathKey(file.path), file.header.id]));
 
   // Resolve each unique cwd to its project root (main repo shared by all
   // worktrees). resolveProject caches per-cwd, so this is cheap after warmup.
-  const uniqueCwds = [...new Set(piSessions.map((s) => s.cwd).filter(Boolean))];
+  const uniqueCwds = [...new Set(files.map((file) => file.header.cwd).filter(Boolean))];
   const projectByCwd = new Map<string, ProjectInfo>();
   await Promise.all(uniqueCwds.map(async (cwd) => {
     projectByCwd.set(cwd, await resolveProject(cwd));
   }));
 
-  return piSessions.map((s) => {
-    cacheSessionPath(s.id, s.path);
-    const project = s.cwd ? projectByCwd.get(s.cwd) : undefined;
+  return files.map(({ path, header, modified }) => {
+    cacheSessionPath(header.id, path);
+    const project = header.cwd ? projectByCwd.get(header.cwd) : undefined;
     return {
-      path: s.path,
-      id: s.id,
-      cwd: s.cwd,
-      name: s.name,
-      created: s.created instanceof Date ? s.created.toISOString() : String(s.created),
-      modified: s.modified instanceof Date ? s.modified.toISOString() : String(s.modified),
-      messageCount: s.messageCount,
-      firstMessage: s.firstMessage || "(no messages)",
-      parentSessionId: s.parentSessionPath ? pathToId.get(sessionPathKey(s.parentSessionPath)) : undefined,
-      projectRoot: project?.projectRoot ?? s.cwd,
+      path,
+      id: header.id,
+      cwd: header.cwd,
+      created: header.timestamp,
+      modified,
+      firstMessage: "",
+      titleLoaded: false,
+      parentSessionId: header.parentSession ? pathToId.get(sessionPathKey(header.parentSession)) : undefined,
+      projectRoot: project?.projectRoot ?? header.cwd,
       ...(project?.isWorktree && project.branch ? { worktreeBranch: project.branch } : {}),
     };
   });
@@ -90,6 +89,7 @@ declare global {
   var __piSessionListPromiseGeneration: number | undefined;
   var __piSessionListGeneration: number | undefined;
   var __piSessionListCache: { data: SessionInfo[]; ts: number } | undefined;
+  var __piSessionListListeners: Set<() => void> | undefined;
 }
 
 const SESSION_LIST_CACHE_TTL_MS = 30_000;
@@ -97,6 +97,13 @@ const SESSION_LIST_CACHE_TTL_MS = 30_000;
 export function invalidateSessionListCache(): void {
   globalThis.__piSessionListGeneration = (globalThis.__piSessionListGeneration ?? 0) + 1;
   globalThis.__piSessionListCache = undefined;
+  for (const listener of globalThis.__piSessionListListeners ?? []) listener();
+}
+
+export function subscribeSessionListChanges(listener: () => void): () => void {
+  const listeners = globalThis.__piSessionListListeners ??= new Set();
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
 }
 
 function getPathCache(): Map<string, string> {
@@ -107,6 +114,12 @@ function getPathCache(): Map<string, string> {
 function getPathToIdCache(): Map<string, string> {
   if (!globalThis.__piPathToSessionIdCache) globalThis.__piPathToSessionIdCache = new Map();
   return globalThis.__piPathToSessionIdCache;
+}
+
+export async function loadSessionTitles(ids: string[], includeFirstMessage = false) {
+  const sessions = await listAllSessions();
+  const requested = new Set(ids);
+  return readSessionTitles(sessions.filter((session) => requested.has(session.id)), includeFirstMessage);
 }
 
 export async function resolveSessionPath(sessionId: string): Promise<string | null> {
@@ -159,39 +172,6 @@ export function invalidateSessionPathCache(sessionId: string): void {
   const pathKey = filePath ? sessionPathKey(filePath) : undefined;
   if (pathKey && reverseCache.get(pathKey) === sessionId) {
     reverseCache.delete(pathKey);
-  }
-}
-
-export function readSessionHeader(filePath: string): SessionHeader | null {
-  const fd = openSync(filePath, "r");
-  try {
-    const chunks: Buffer[] = [];
-    const maxHeaderBytes = 64 * 1024;
-    let position = 0;
-    let foundNewline = false;
-
-    while (position < maxHeaderBytes && !foundNewline) {
-      const buffer = Buffer.allocUnsafe(Math.min(4096, maxHeaderBytes - position));
-      const bytesRead = readSync(fd, buffer, 0, buffer.length, position);
-      if (bytesRead === 0) break;
-      const data = buffer.subarray(0, bytesRead);
-      const newlineIndex = data.indexOf(0x0a);
-      chunks.push(newlineIndex === -1 ? data : data.subarray(0, newlineIndex));
-      position += bytesRead;
-      foundNewline = newlineIndex !== -1;
-    }
-
-    if (!foundNewline && position >= maxHeaderBytes) return null;
-    const firstLine = Buffer.concat(chunks).toString("utf8").trimEnd();
-    if (!firstLine) return null;
-    try {
-      const header = JSON.parse(firstLine) as SessionHeader;
-      return header.type === "session" ? header : null;
-    } catch {
-      return null;
-    }
-  } finally {
-    closeSync(fd);
   }
 }
 

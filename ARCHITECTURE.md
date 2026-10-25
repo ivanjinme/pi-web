@@ -8,7 +8,8 @@ implementation details.
 ```text
 Browser                Next.js Server              AgentSession (in-process)
   │                        │                               │
-  ├─ GET /api/sessions ────▶ reads ~/.pi/agent/sessions/   │
+  ├─ GET /api/sessions ────▶ headers + file mtimes only    │
+  ├─ POST /api/sessions ───▶ titles for visible thread ids │
   ├─ GET /api/sessions/[id] reads .jsonl file directly     │
   ├─ GET /api/agent/running/events ───▶ running id SSE     │
   │                        │                               │
@@ -39,7 +40,13 @@ Browser                Next.js Server              AgentSession (in-process)
 
 ## Session Boundaries
 
-- **Browse:** persisted JSONL via `SessionManager`; no `AgentSession`.
+- **Browse:** persisted JSONL; no `AgentSession`. Sidebar discovery reads only
+  headers/mtimes; visible thread titles search backward for the latest
+  `session_info`, falling back to the first 50 characters of user text.
+  Full transcript parsing via `SessionManager` waits until a thread is opened.
+- New Web sessions generate a title in the background after their first
+  successful reply, reusing the naming facade once without overwriting a manual
+  title. Failures keep the first-message fallback; no persistent title index.
 - **Run:** in-process `AgentSessionWrapper`; created/resumed only for runtime
   commands.
 - Never make browsing require a live wrapper.

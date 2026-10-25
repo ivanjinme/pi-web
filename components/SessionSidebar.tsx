@@ -15,6 +15,7 @@ import {
 import { createPortal } from "react-dom";
 import type { SessionInfo } from "@/lib/types";
 import type { SidebarPin } from "@/lib/sidebar-pins";
+import { applySessionTitle, needsSessionTitle, threadTitleIds, visibleThreadRoots } from "@/lib/sidebar-session-list";
 import {
   PROJECT_FOLDERS_CHANGED_EVENT,
   forgetProjectFolder,
@@ -693,13 +694,25 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   useEffect(() => { void requestPins(); }, [requestPins]);
 
+  const [catalogGeneration, setCatalogGeneration] = useState(0);
+  const listRequestRef = useRef(0);
   const loadSessions = useCallback(async (showLoading = false) => {
+    const request = ++listRequestRef.current;
     try {
       if (showLoading) setLoading(true);
       const res = await fetch("/api/sessions");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as { sessions: SessionInfo[]; runningSessionIds?: string[] };
-      setAllSessions(data.sessions);
+      if (request !== listRequestRef.current) return;
+      setAllSessions((previous) => {
+        const byId = new Map(previous.map((session) => [session.id, session]));
+        return data.sessions.map((session) => {
+          const old = byId.get(session.id);
+          return old?.modified === session.modified && old.titleLoaded
+            ? { ...session, name: old.name, firstMessage: old.firstMessage, titleLoaded: true, firstMessageLoaded: old.firstMessageLoaded }
+            : session;
+        });
+      });
       // Treat the fetched running set as an initial fallback only. Once SSE is
       // live it owns this state, so a slow fetch can't revive a stale snapshot.
       if (!sseAuthoritativeRef.current) {
@@ -713,10 +726,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         return next.size === prev.size ? prev : next;
       });
       setError(null);
+      // 与目录更新一起提交；相同目录也能重试尚未加载的标题。
+      setCatalogGeneration(request);
     } catch (e) {
-      setError(String(e));
+      if (request === listRequestRef.current) setError(String(e));
     } finally {
-      if (showLoading) setLoading(false);
+      if (request === listRequestRef.current) setLoading(false);
     }
   }, []);
 
@@ -741,6 +756,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     source.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data) as { type?: string; runningSessionIds?: string[] };
+        if (data.type === "sessions_changed") void loadSessions();
         if (data.type === "running") {
           sseAuthoritativeRef.current = true;
           setRunningSessionIds(new Set(data.runningSessionIds ?? []));
@@ -752,7 +768,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
     // On error EventSource auto-reconnects; keep the last known state meanwhile.
     return () => source.close();
-  }, []);
+  }, [loadSessions]);
 
   useEffect(() => {
     const previous = previousRunningSessionIdsRef.current;
@@ -1146,6 +1162,67 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     return visible;
   }, [allProjectsVisible, normalizedSessionSearch, unpinnedProjectGroups, selectedProject]);
 
+  // 搜索才按需读取全部标题；平时只读取真正显示的项目、置顶和选中 thread。
+  const titleRequestKey = JSON.stringify(useMemo(() => {
+    const ids = new Set<string>();
+    if (normalizedSessionSearch) {
+      for (const session of allSessions) ids.add(session.id);
+    } else {
+      const groups = projectsOpen ? [...visibleProjectGroups] : [];
+      if (pinsOpen) {
+        for (const { pin, session } of visiblePins) {
+          if (session) ids.add(session.id);
+          else {
+            const group = projectGroups.find((group) => projectPathKey(group.root) === projectPathKey(pin.id));
+            if (group) groups.push(group);
+          }
+        }
+      }
+      for (const group of groups) {
+        const roots = visibleThreadRoots(group, projectVisibleCounts[group.root] ?? 5, selectedSessionId);
+        for (const id of threadTitleIds(roots)) ids.add(id);
+      }
+    }
+    const includeFirstMessage = Boolean(normalizedSessionSearch);
+    return allSessions.filter((session) => ids.has(session.id) && needsSessionTitle(session, includeFirstMessage))
+      .map(({ id, modified }) => ({ id, modified, includeFirstMessage }));
+  }, [allSessions, normalizedSessionSearch, projectsOpen, visibleProjectGroups, pinsOpen, visiblePins, projectGroups, projectVisibleCounts, selectedSessionId]));
+
+  useEffect(() => {
+    const requested = JSON.parse(titleRequestKey) as { id: string; modified: string; includeFirstMessage: boolean }[];
+    if (!requested.length) return;
+    const controller = new AbortController();
+    const load = async () => {
+      const titles: { id: string; name?: string; firstMessage: string }[] = [];
+      for (let offset = 0; offset < requested.length; offset += 100) {
+        const response = await fetch("/api/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ids: requested.slice(offset, offset + 100).map(({ id }) => id),
+            includeFirstMessage: requested[0].includeFirstMessage,
+          }),
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json() as { titles: typeof titles };
+        titles.push(...data.titles);
+      }
+      if (controller.signal.aborted) return;
+      const revisions = new Map(requested.map(({ id, modified }) => [id, modified]));
+      const byId = new Map(titles.map((title) => [title.id, title]));
+      setAllSessions((sessions) => sessions.map((session) => {
+        const title = byId.get(session.id);
+        return title && session.modified === revisions.get(session.id)
+          ? applySessionTitle(session, title, requested[0].includeFirstMessage) : session;
+      }));
+    };
+    void load().catch((error) => {
+      if (!controller.signal.aborted) setError(String(error));
+    });
+    return () => controller.abort();
+  }, [titleRequestKey, catalogGeneration]);
+
   useEffect(() => {
     if (sessionSearchOpen) sessionSearchRef.current?.focus();
   }, [sessionSearchOpen]);
@@ -1160,21 +1237,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     const roots = group.roots;
     const visibleCount = projectVisibleCounts[group.root] ?? 5;
     const hasMore = roots.length > visibleCount;
-    let visibleRoots = roots.slice(0, visibleCount);
-
-    if (selectedSessionId) {
-      const sessionsById = new Map(group.sessions.map((session) => [session.id, session]));
-      let selectedRootId = selectedSessionId;
-      let parentId = sessionsById.get(selectedRootId)?.parentSessionId;
-      while (parentId && sessionsById.has(parentId)) {
-        selectedRootId = parentId;
-        parentId = sessionsById.get(parentId)?.parentSessionId;
-      }
-      const selectedRoot = roots.find((node) => node.session.id === selectedRootId);
-      if (selectedRoot && !visibleRoots.includes(selectedRoot)) {
-        visibleRoots = [...visibleRoots.slice(0, visibleCount - 1), selectedRoot];
-      }
-    }
+    const visibleRoots = visibleThreadRoots(group, visibleCount, selectedSessionId);
 
     const label = projectLabels[group.root] || projectDefaultLabel(group.root);
     const isPinned = pinnedProjects.has(projectPathKey(group.root));
@@ -1886,7 +1949,7 @@ function SessionItem({
   const [deleting, setDeleting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const title = session.name || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
+  const title = session.titleLoaded === false ? "…" : session.name || session.firstMessage.slice(0, 50);
 
   const startRename = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();

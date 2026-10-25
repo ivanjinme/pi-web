@@ -1,4 +1,5 @@
 import { getRunningRpcSessionIds, subscribeRunningSessions } from "@/lib/rpc-manager";
+import { subscribeSessionListChanges } from "@/lib/session-reader";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,14 @@ export async function GET(req: Request) {
         }
       });
 
+      const unsubscribeSessions = subscribeSessionListChanges(() => {
+        try {
+          encode({ type: "sessions_changed" });
+        } catch {
+          // 连接已关闭。
+        }
+      });
+
       // Initial snapshot so the client renders the correct state immediately.
       // (A duplicate frame here is harmless: the client just sets the same set.)
       encode({ type: "running", runningSessionIds: getRunningRpcSessionIds() });
@@ -39,6 +48,7 @@ export async function GET(req: Request) {
       const cleanup = () => {
         clearInterval(heartbeat);
         unsubscribe();
+        unsubscribeSessions();
         try { controller.close(); } catch { /* already closed */ }
       };
 

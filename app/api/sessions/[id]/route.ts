@@ -186,9 +186,14 @@ export async function PATCH(
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
-    const sm = SessionManager.open(filePath);
-    sm.appendSessionInfo(name.trim());
-    invalidateSessionListCache();
+    const live = getRpcSession(id);
+    if (live?.isAlive()) {
+      // 活跃 runtime 共用同一份元数据，避免后台自动命名覆盖刚刚的手动改名。
+      await live.send({ type: "set_session_name", name: name.trim() });
+    } else {
+      SessionManager.open(filePath).appendSessionInfo(name.trim());
+      invalidateSessionListCache();
+    }
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
