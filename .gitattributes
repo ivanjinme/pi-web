@@ -1,0 +1,2 @@
+# Preserve BAT CRLF bytes in raw downloads as well as Git checkouts.
+/launch-weclio-web.bat -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

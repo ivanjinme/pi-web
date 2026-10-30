@@ -202,17 +202,38 @@ function updateInlineCodeMarker(line: string, initialMarkerSize: number): number
 function normalizeInlineLatexMath(line: string): string {
   if (
     /^\s{0,3}\[[^\]]+\]:/.test(line) ||
-    /]\s*\(/.test(line) ||
     /<(?:!--|\/?[A-Za-z][^>]*>)/.test(line) ||
-    /\b(?:https?|file|mailto):/i.test(line) ||
     /\b[A-Za-z]:\\/.test(line)
   ) {
     return line;
   }
 
+  // Protect link destinations, not the entire line containing a citation.
+  const protectedRanges: [number, number][] = [];
+  for (const link of line.matchAll(/]\s*\(/g)) {
+    let cursor = link.index + link[0].length;
+    let depth = 1;
+    while (cursor < line.length && depth > 0) {
+      if (line[cursor] === "\\") {
+        cursor += 2;
+        continue;
+      }
+      if (line[cursor] === "(") depth++;
+      else if (line[cursor] === ")") depth--;
+      cursor++;
+    }
+    protectedRanges.push([link.index, cursor]);
+  }
+  for (const url of line.matchAll(/\b(?:https?|file|mailto):[^\s<>]+/gi)) {
+    protectedRanges.push([url.index, url.index + url[0].length]);
+  }
+
   return line.replace(
     /(?<!\\)\\\(([^`\r\n$]+?)(?<!\\)\\\)/g,
-    (match, math: string) => (math.trim() ? `$${math}$` : match),
+    (match, math: string, offset: number) => {
+      if (protectedRanges.some(([start, end]) => offset < end && offset + match.length > start)) return match;
+      return math.trim() ? `$${math}$` : match;
+    },
   );
 }
 

@@ -99,6 +99,37 @@ test("renders LaTeX parenthesis delimiters as inline math", () => {
   assert.match(html, /r_c/);
 });
 
+test("renders inline math beside a citation link", () => {
+  const html = renderMarkdown(String.raw`途径修正因子 \(F_{\mathrm{route}}=100\)。[来源](https://example.com/source)`);
+
+  assert.match(html, /class="katex"/);
+  assert.match(html, /href="https:\/\/example\.com\/source"/);
+});
+
+test("renders the reported route-factor paragraph without losing its citation", () => {
+  const markdown = String.raw`依据分子量646.9及XLogP 15.5，采用Boobier等的理化性质分档方法，估计经口生物利用度属于≤1%档；本评估采用**途径修正因子 \(F_{\mathrm{route}}=100\)**。这是模型分档估计，而非实测生物利用度；植入释放后的系统可利用部分按完全吸收处理。（Boobier等，2026，图1，DOI：10.1016/j.yrtph.2026.106215）[Tris(2,4-di-tert-butylphenyl) phosphite | C42H63O3P | CID 91601 - PubChem](https://pubchem.ncbi.nlm.nih.gov/compound/Irgafos%20168?utm_source=openai)`;
+  const html = renderMarkdown(markdown);
+
+  assert.match(html, /class="katex"/);
+  assert.match(html, /href="https:\/\/pubchem\.ncbi\.nlm\.nih\.gov\/compound\/Irgafos%20168\?utm_source=openai"/);
+  assert.doesNotMatch(html, /katex-error/);
+});
+
+test("normalizes math outside link destinations but preserves nested and escaped URL parentheses", () => {
+  for (const destination of [
+    String.raw`https://example.com/\(manual\)`,
+    String.raw`relative/(nested/(part))/\(manual\)`,
+  ]) {
+    const markdown = String.raw`\(x+y\) [docs](${destination}) \(z\)`;
+    assert.equal(normalizeDisplayMath(markdown), `$x+y$ [docs](${destination}) $z$`);
+  }
+});
+
+test("preserves bare URL delimiters while normalizing math elsewhere on the line", () => {
+  const markdown = String.raw`\(x+y\) https://example.com/\(manual\) \(z\)`;
+  assert.equal(normalizeDisplayMath(markdown), String.raw`$x+y$ https://example.com/\(manual\) $z$`);
+});
+
 test("renders paired LaTeX bracket delimiters as display math", () => {
   const html = renderMarkdown(String.raw`\[
 P(\lambda)=o_b+\lambda r_b
