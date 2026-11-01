@@ -64,10 +64,8 @@ app.whenReady().then(async () => {
     if (!isAppUrl(url)) event.preventDefault();
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (isAppUrl(url)) {
-      void window.loadURL(url).catch((error) => showError(error.message));
-    } else if (isExternalUrl(url)) {
-      // 外链仅交给浏览器，禁止 file:、自定义协议等调用本地程序。
+    if (isExternalUrl(url) || (isAppUrl(url) && new URL(url).protocol === "http:")) {
+      // 弹出链接交给浏览器，避免完整历史等页面替换主界面；禁止本地协议。
       void shell.openExternal(url).catch((error) => dialog.showErrorBox("无法打开链接", error.message));
     }
     return { action: "deny" };

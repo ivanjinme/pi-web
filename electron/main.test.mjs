@@ -16,18 +16,21 @@ export const dialog = {
   showErrorBox(...args) { this.errors.push(args); },
   async showMessageBox(...args) { this.prompts.push(args); return { response: 0 }; }
 };
-export const shell = { openExternal: async () => {} };
+export const shell = {
+  opened: [],
+  async openExternal(url) { this.opened.push(url); }
+};
 export class BrowserWindow extends EventEmitter {
   static windows = [];
   constructor(options) {
-    super(); this.options = options; this.shown = 0; this.reloads = 0;
+    super(); this.options = options; this.shown = 0; this.reloads = 0; this.urls = [];
     this.webContents = Object.assign(new EventEmitter(), {
       session: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} },
-      setWindowOpenHandler() {}
+      setWindowOpenHandler(handler) { this.openWindow = handler; }
     });
     BrowserWindow.windows.push(this);
   }
-  async loadURL() {}
+  async loadURL(url) { this.urls.push(url); }
   show() { this.shown++; }
   reload() { this.reloads++; }
   isDestroyed() { return false; }
@@ -43,7 +46,7 @@ function runMain(check) {
     registerHooks({ resolve(specifier, context, next) {
       return specifier === 'electron' ? { url: ${JSON.stringify(mockUrl)}, shortCircuit: true } : next(specifier, context);
     }});
-    const { app, BrowserWindow, dialog } = await import('electron');
+    const { app, BrowserWindow, dialog, shell } = await import('electron');
     await import(${JSON.stringify(mainUrl)});
     await setImmediate();
     const window = BrowserWindow.windows[0];
@@ -60,6 +63,31 @@ test("desktop waits for its first paint before showing the window", () => {
     assert.equal(window.options.webPreferences.contextIsolation, true);
     assert.equal(window.options.webPreferences.nodeIntegration, false);
     assert.equal(window.options.webPreferences.sandbox, true);
+  `);
+});
+
+test("full-history popups open in the browser without replacing the application", () => {
+  runMain(`
+    const appUrl = window.urls[0];
+    const url = appUrl + '/api/sessions/test/export?inline=1';
+    assert.deepEqual(window.webContents.openWindow({ url }), { action: 'deny' });
+    await setImmediate();
+    assert.deepEqual(shell.opened, [url]);
+    assert.deepEqual(window.urls, [appUrl]);
+    assert.deepEqual(app.exits, []);
+  `);
+});
+
+test("external HTTP links open in the browser while unsafe popup schemes stay blocked", () => {
+  runMain(`
+    const url = 'https://example.com/docs';
+    assert.deepEqual(window.webContents.openWindow({ url }), { action: 'deny' });
+    for (const blocked of ['file:///C:/secret', 'javascript:alert(1)', 'data:text/html,test', 'vscode://file/test', 'blob:' + window.urls[0] + '/test']) {
+      assert.deepEqual(window.webContents.openWindow({ url: blocked }), { action: 'deny' });
+    }
+    await setImmediate();
+    assert.deepEqual(shell.opened, [url]);
+    assert.equal(window.urls.length, 1);
   `);
 });
 
