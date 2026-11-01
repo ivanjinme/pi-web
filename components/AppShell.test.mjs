@@ -16,6 +16,33 @@ const clearDraftProjectStart = selectDraftProjectEnd;
 const clearDraftProjectEnd = source.indexOf("const resolveDefaultWorkspace = useCallback", clearDraftProjectStart);
 const clearDraftProjectSource = source.slice(clearDraftProjectStart, clearDraftProjectEnd);
 
+test("sidebar collapse lives in the sidebar while the chat opener only appears when closed", async () => {
+  const sidebarSource = await readFile(new URL("./SessionSidebar.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(source, /<SessionSidebar[\s\S]*?onToggleSidebar=\{handleSidebarToggle\}/);
+  assert.match(source, /\{!sidebarOpen && \(\s*<button[\s\S]*?onClick=\{handleSidebarToggle\}[\s\S]*?aria-label=\{translate\("sidebar.show"\)\}/);
+  assert.doesNotMatch(source, /translate\("sidebar.hide"\)/);
+  assert.match(sidebarSource, /className="session-sidebar-header-row"[\s\S]*?<PiWebTitle \/>[\s\S]*?className="sidebar-collapse-button"\s*onClick=\{onToggleSidebar\}\s*aria-label=\{t\("sidebar.hide"\)\}/);
+  assert.match(sidebarSource, /: "Weclio";\s*const display = useScramble/);
+  assert.match(styles, /\.session-sidebar-header-row > \.session-sidebar-brand\s*\{[^}]*font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;[^}]*font-weight: 500;/);
+  assert.match(styles, /\.session-sidebar-brand\s*\{\s*height: 36px;/);
+  assert.doesNotMatch(styles, /\.session-sidebar-header-row > button\s*\{/);
+  assert.match(styles, /\.sidebar-collapse-button:focus-visible\s*\{/);
+  assert.match(styles, /--app-top-bar-offset: 4px;/);
+  assert.match(styles, /\.session-sidebar-header\s*\{\s*padding: var\(--app-top-bar-offset\) 10px 15px;/);
+  assert.match(source, /ref=\{topBarRef\}[^\n]*marginTop: "var\(--app-top-bar-offset\)"/);
+  assert.match(source, /position: "fixed", top: "var\(--app-top-bar-offset\)", right: 0/);
+  const headerRow = styles.match(/\.session-sidebar-header-row\s*\{([^}]*)\}/)?.[1];
+  const collapseButton = styles.match(/\.sidebar-collapse-button\s*\{([^}]*)\}/)?.[1];
+  assert.ok(headerRow);
+  assert.ok(collapseButton);
+  assert.match(headerRow, /display: flex;\s*align-items: center;/);
+  assert.match(headerRow, /height: 36px;/);
+  assert.match(headerRow, /margin-bottom: 24px;/);
+  assert.match(collapseButton, /width: 36px;\s*height: 36px;/);
+  assert.doesNotMatch(collapseButton, /position:|\btop:|transform:/);
+});
+
 test("closing the right panel or collapsing Explorer keeps the file tree mounted", () => {
   assert.match(source, /\{activeCwd \? \(\s*<>\s*<section/);
   assert.doesNotMatch(source, /\{rightPanelOpen && activeCwd \? \(/);

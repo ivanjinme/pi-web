@@ -48,6 +48,7 @@ interface Props {
   onSessionDeleted?: (sessionId: string) => void;
   selectedCwd?: string | null;
   onCwdChange?: (cwd: string | null, projectRoot?: string | null) => void;
+  onToggleSidebar?: () => void;
 }
 
 interface WorktreeEntry {
@@ -563,7 +564,7 @@ function PiWebTitle() {
   const [scrambling, setScrambling] = useState(false);
   const revertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const target = showVersion ? `${process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}p${process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}` : "weclio";
+  const target = showVersion ? `${process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}p${process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}` : "Weclio";
   const display = useScramble(target, scrambling);
 
   const triggerScramble = useCallback((toVersion: boolean) => {
@@ -590,29 +591,18 @@ function PiWebTitle() {
       className="session-sidebar-brand"
       onClick={handleClick}
       style={{
-        display: "flex", alignItems: "center", gap: 5,
+        display: "flex", alignItems: "center",
         background: "none", border: "none", padding: "0 2px", cursor: "default",
-        fontWeight: 700, fontSize: 18, letterSpacing: "-0.01em",
         color: showVersion ? "var(--accent)" : "var(--text)",
-        fontFamily: "var(--font-mono)",
         minWidth: "6ch",
       }}
     >
-      <span
-        className="session-sidebar-brand-icon"
-        aria-hidden="true"
-        style={{
-          display: "block", width: 24, height: 24, flex: "0 0 24px",
-          borderRadius: 6,
-          background: 'url("/brand/weclio-sidebar.svg?v=1") center / contain no-repeat',
-        }}
-      />
       <span>{display}</span>
     </button>
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onToggleSidebar }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1331,6 +1321,20 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       <div className="session-sidebar-header">
         <div className="session-sidebar-header-row">
           <PiWebTitle />
+          {onToggleSidebar && (
+            <button
+              type="button"
+              className="sidebar-collapse-button"
+              onClick={onToggleSidebar}
+              aria-label={t("sidebar.hide")}
+              title={t("sidebar.hide")}
+              aria-expanded={true}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="9" y1="3" x2="9" y2="21" />
+              </svg>
+            </button>
+          )}
           <div style={{ display: "flex", gap: 6 }}>
             <button
               onClick={handleNewSession}

@@ -19,6 +19,7 @@
 }
 
 :root {
+  --app-top-bar-offset: 4px;
   /* Mirrors ai-agent-app's light Radix/Tailwind palette. */
   --bg: #fbfbfe;
   /* Cool, near-white cyan used by the sidebar and top chrome. */
@@ -820,7 +821,7 @@ span.linenumber {
 }
 
 .session-sidebar-header {
-  padding: 12px 10px 15px;
+  padding: var(--app-top-bar-offset) 10px 15px;
   border-bottom: 0;
   flex-shrink: 0;
 }
@@ -829,33 +830,57 @@ span.linenumber {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
+  height: 36px;
+  margin-bottom: 24px;
 }
 
 /* Primary navigation mirrors ai-agent-app's deliberately spare action area. */
 .session-sidebar-brand {
+  height: 36px;
   min-width: 0;
 }
 
-.session-sidebar-brand-icon {
-  width: 24px;
-  height: 24px;
-  flex: 0 0 24px;
-  border-radius: 6px;
-  background: url("/brand/weclio-sidebar.svg?v=1") center / contain no-repeat;
+.session-sidebar-header-row > .session-sidebar-brand {
+  color: var(--text) !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1;
 }
 
-.session-sidebar-header-row > button {
-  color: var(--text) !important;
-  font-family: Georgia, "Times New Roman", serif !important;
-  font-size: 18px !important;
-  font-weight: 600 !important;
-  letter-spacing: -0.045em !important;
-  line-height: 1 !important;
+/* 微调字形底边，不移动按钮点击区域。 */
+.session-sidebar-brand > span {
+  transform: translateY(-1px);
 }
 
 .session-sidebar-header-row > div {
   display: none !important;
+}
+
+.sidebar-collapse-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.sidebar-collapse-button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.sidebar-collapse-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .sidebar-primary-actions {
