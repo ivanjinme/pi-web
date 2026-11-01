@@ -29,6 +29,7 @@ const DEFAULTS = [
   { name: '@weclio/pi-submarine', kind: 'extensions' },
   { name: '@weclio/pi-citations', kind: 'extensions' },
   { name: 'weclio-cli', kind: 'skills' },
+  { name: '@weclio/pi-persona', kind: 'extensions' },
 ];
 const REQUIRED_SKILLS = ['sci-search', 'tox-eval', 'tra-md', 'read-across', 'tra-md2word', 'docx'];
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

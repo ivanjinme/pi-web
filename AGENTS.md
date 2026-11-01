@@ -1,3 +1,5 @@
+Assume the user hasn't fully thought through their needs. Clarify and challenge for value.
+
 # Repository Guidelines
 
 This file is the top-level index for AI agents working in this repository.

@@ -50,7 +50,8 @@ weclio-web --port 8080 -H 0.0.0.0 --no-open
 
 ```bash
 npm install
-npm run dev   # http://127.0.0.1:8888
+npm run dev           # 桌面 :8888
+npm run dev:web       # Web :8888（与桌面二选一，切换前先停止原服务）
 
 node_modules/.bin/tsc --noEmit
 npm run lint

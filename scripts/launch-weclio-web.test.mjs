@@ -154,12 +154,39 @@ test("unchanged or older mirror versions never cause reinstall or downgrade", ()
 test("first initialization adds ordinary sources without changing existing packages", async (t) => {
   const fixture = resourceFixture(await sandbox(t), ["npm:custom-tools"]);
   await launcher.syncResources(fixture.options);
-  assert.equal(fixture.calls.length, 4);
+  assert.equal(fixture.calls.length, launcher.DEFAULTS.length);
   assert.equal(fixture.entries[0], "npm:custom-tools");
   assert.deepEqual(fixture.entries.slice(1), launcher.DEFAULTS.map(({ name }) => name === "weclio-cli"
     ? { source: `npm:${name}`, skills: ["!skills/sci-search/**"] }
     : `npm:${name}`));
-  assert.equal(fixture.receipt.initialized.length, 4);
+  assert.equal(fixture.receipt.initialized.length, launcher.DEFAULTS.length);
+});
+
+test("existing launcher users receive persona without reinstalling other defaults", async (t) => {
+  const previous = ["@weclio/pi-web-search", "@weclio/pi-submarine", "@weclio/pi-citations", "weclio-cli"];
+  const entries = previous.map((name) => `npm:${name}`);
+  const fixture = resourceFixture(await sandbox(t), entries, previous);
+  for (const name of previous) await fixture.options.install(name, "1.2.0");
+  fixture.calls.length = 0;
+  await launcher.syncResources(fixture.options);
+  assert.deepEqual(fixture.calls, [["@weclio/pi-persona", "1.2.0"]]);
+  assert.deepEqual(fixture.entries, [...previous.map((name) => `npm:${name}`), "npm:@weclio/pi-persona"]);
+  assert.ok(fixture.receipt.initialized.includes("@weclio/pi-persona"));
+  assert.equal(launcher.DEFAULTS.find((resource) => resource.name === "@weclio/pi-persona")?.kind, "extensions");
+});
+
+test("an unpublished persona does not prevent other defaults from being installed or mark persona initialized", async (t) => {
+  const fixture = resourceFixture(await sandbox(t));
+  fixture.options.latest = async (name) => {
+    if (name === "@weclio/pi-persona") throw new Error("package not found");
+    return "1.2.0";
+  };
+  await launcher.syncResources(fixture.options);
+  assert.deepEqual(fixture.calls.map(([name]) => name), ["@weclio/pi-web-search", "@weclio/pi-submarine", "@weclio/pi-citations", "weclio-cli"]);
+  assert.ok(!fixture.receipt.initialized.includes("@weclio/pi-persona"));
+  assert.ok(!fixture.entries.includes("npm:@weclio/pi-persona"));
+  assert.equal(fixture.warnings.length, 1);
+  assert.match(fixture.warnings[0], /@weclio\/pi-persona/);
 });
 
 test("CLI default exclusion is initialized once and preserves later user choices across updates", async (t) => {
@@ -326,7 +353,7 @@ test("lookup failure does not reinstall an already configured resource", async (
   fixture.options.latest = async () => { throw new Error("offline"); };
   await launcher.syncResources(fixture.options);
   assert.deepEqual(fixture.calls, []);
-  assert.equal(fixture.warnings.length, 4);
+  assert.equal(fixture.warnings.length, launcher.DEFAULTS.length);
 });
 
 test("a configured package remains removed after an offline first launch", async (t) => {
@@ -352,7 +379,7 @@ test("a failed install is not marked initialized and can retry on the next launc
   await launcher.syncResources(fixture.options);
   assert.deepEqual(fixture.receipt.initialized, []);
   assert.deepEqual(fixture.entries, []);
-  assert.equal(fixture.warnings.length, 4);
+  assert.equal(fixture.warnings.length, launcher.DEFAULTS.length);
 });
 
 test("settings save failure is reported and does not mark the package initialized", async (t) => {
@@ -360,7 +387,7 @@ test("settings save failure is reported and does not mark the package initialize
   fixture.settings.drainErrors = () => [{ error: new Error("disk full") }];
   await launcher.syncResources(fixture.options);
   assert.deepEqual(fixture.receipt.initialized, []);
-  assert.equal(fixture.warnings.length, 4);
+  assert.equal(fixture.warnings.length, launcher.DEFAULTS.length);
 });
 
 test("browser search prefers every Chrome location before any Edge location", () => {

@@ -5,10 +5,16 @@ Run from the repository root. Use project-local binaries only.
 ## Development
 
 ```bash
-npm run dev
+npm run dev          # Desktop :8888 (alias: dev:desktop)
+npm run dev:web      # Web :8888
+node --test electron/*.test.mjs
 node_modules/.bin/tsc --noEmit
 npm run lint
 ```
+
+Desktop: `PORT` overrides 8888; requires a free port. Close window/Ctrl+C cleans up.
+Desktop and Web development are alternatives: stop the existing server before switching.
+One Next dev server per directory, regardless of port.
 
 Never run `next build` during development; it pollutes `.next/`.
 

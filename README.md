@@ -50,7 +50,8 @@ More docs in [`docs/`](./docs).
 
 ```bash
 npm install
-npm run dev   # http://127.0.0.1:8888
+npm run dev           # Desktop :8888
+npm run dev:web       # Web :8888 (alternative to Desktop; stop it first)
 
 node_modules/.bin/tsc --noEmit
 npm run lint
