@@ -25,6 +25,10 @@ app.whenReady().then(async () => {
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,
+    ...(process.platform === "win32" ? {
+      titleBarStyle: "hidden",
+      titleBarOverlay: { color: "#f8f7ff", symbolColor: "#1d1e21", height: 40 },
+    } : {}),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -50,6 +54,25 @@ app.whenReady().then(async () => {
   window.webContents.on("console-message", (event) => {
     if (event.level === "error") console.error(`[desktop] 页面错误: ${event.message}`);
   });
+
+  if (process.platform === "win32") {
+    // Electron 原生全屏不会更新覆盖层 visible，需要单独同步此只读展示状态。
+    const syncFullscreen = () => {
+      void window.webContents.executeJavaScript(
+        `document.documentElement.toggleAttribute("data-native-fullscreen", ${window.isFullScreen()})`,
+      ).catch((error) => console.error("[desktop] 无法同步全屏状态:", error));
+    };
+    window.on("enter-full-screen", syncFullscreen);
+    window.on("leave-full-screen", syncFullscreen);
+    window.webContents.on("dom-ready", syncFullscreen);
+    window.webContents.on("did-change-theme-color", (_event, color) => {
+      if (!color) return;
+      // Electron 将 theme-color 规范化为 #rrggbb，按亮度选择原生按钮前景色。
+      const rgb = Number.parseInt(color.slice(1), 16);
+      const brightness = ((rgb >> 16) * 299 + ((rgb >> 8) & 255) * 587 + (rgb & 255) * 114) / 1000;
+      window.setTitleBarOverlay({ color, symbolColor: brightness < 128 ? "#f0f1f2" : "#1d1e21" });
+    });
+  }
 
   window.webContents.session.setPermissionRequestHandler((_contents, permission, callback, details) => {
     callback(isPermissionAllowed(permission, details.requestingUrl));

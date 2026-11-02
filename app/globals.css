@@ -57,6 +57,58 @@ html.dark {
   --bg-subtle: rgba(255, 255, 255, 0.04);
 }
 
+/* 覆盖层尺寸由系统提供；普通 Web 不启用这些变量和拖动区域。 */
+html[data-window-controls-overlay]:not([data-native-fullscreen]) {
+  --app-top-bar-offset: 0px;
+  --app-titlebar-height: env(titlebar-area-height, 40px);
+  --app-window-controls-inset: max(0px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
+  --app-titlebar-button-height: min(36px, var(--app-titlebar-height));
+  --app-window-toggle-top: calc((var(--app-titlebar-height) - var(--app-titlebar-button-height)) / 2);
+}
+
+html[data-window-controls-overlay]:not([data-native-fullscreen]) :is(.app-top-bar, .session-sidebar-header-row, .right-workspace-titlebar) {
+  height: var(--app-titlebar-height);
+  min-height: var(--app-titlebar-height);
+  background: var(--bg-panel);
+  -webkit-app-region: drag;
+}
+
+html[data-window-controls-overlay]:not([data-native-fullscreen]) .app-top-bar {
+  min-width: 0;
+}
+
+html[data-window-controls-overlay]:not([data-native-fullscreen]) .sidebar-collapse-button {
+  height: var(--app-titlebar-button-height);
+}
+
+html[data-window-controls-overlay]:not([data-native-fullscreen]) .session-sidebar-brand {
+  height: var(--app-titlebar-height);
+}
+
+html[data-window-controls-overlay]:not([data-native-fullscreen]) .app-top-bar-actions {
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+html[data-window-controls-overlay]:not([data-native-fullscreen]) .right-workspace-titlebar {
+  padding-right: calc(36px + var(--app-window-controls-inset));
+}
+
+html[data-window-controls-overlay]:not([data-native-fullscreen]) .right-empty-file-tab {
+  height: var(--app-titlebar-height);
+}
+
+html[data-window-controls-overlay]:not([data-native-fullscreen]) :is(.app-top-bar, .session-sidebar-header-row, .right-workspace-titlebar) :is(button, a, input, select, textarea, [role="button"], [role="menu"], [contenteditable="true"], .file-tab),
+html[data-window-controls-overlay]:not([data-native-fullscreen]) :is(.workspace-panel-toggle, [role="separator"], [role="dialog"], .settings-backdrop) {
+  -webkit-app-region: no-drag;
+}
+
+/* 模态弹窗盖住顶栏时，不让背后的拖动区域吞掉遮罩上的点击。 */
+html[data-window-controls-overlay]:not([data-native-fullscreen]):has([aria-modal="true"]) :is(.app-top-bar, .session-sidebar-header-row, .right-workspace-titlebar) {
+  -webkit-app-region: no-drag;
+}
+
 /* Theme toggle: circular wipe via View Transitions API.
    Disable the UA cross-fade; the actual clip-path animation is driven by
    Element.animate() in hooks/useTheme.ts after transition.ready resolves. */

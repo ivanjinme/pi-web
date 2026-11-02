@@ -31,7 +31,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
         background: "var(--bg-panel)",
         overflowX: "auto",
         flexShrink: 0,
-        height: 36,
+        height: "var(--app-titlebar-height, 36px)",
       }}
     >
       {tabs.map((tab) => {
@@ -39,6 +39,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
         return (
           <div
             key={tab.id}
+            className="file-tab"
             onClick={() => onSelectTab(tab.id)}
             onMouseDown={(e) => {
               if (e.button === 1) e.preventDefault();
@@ -53,7 +54,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               display: "flex",
               alignItems: "center",
               gap: 6,
-              height: 36,
+              height: "var(--app-titlebar-height, 36px)",
               paddingLeft: 12,
               paddingRight: 6,
               borderRight: "1px solid var(--border)",

@@ -23,21 +23,25 @@ export const shell = {
 export class BrowserWindow extends EventEmitter {
   static windows = [];
   constructor(options) {
-    super(); this.options = options; this.shown = 0; this.reloads = 0; this.urls = [];
+    super(); this.options = options; this.shown = 0; this.reloads = 0; this.urls = []; this.overlayUpdates = []; this.fullscreen = false;
     this.webContents = Object.assign(new EventEmitter(), {
       session: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} },
+      scripts: [],
+      async executeJavaScript(script) { this.scripts.push(script); },
       setWindowOpenHandler(handler) { this.openWindow = handler; }
     });
     BrowserWindow.windows.push(this);
   }
   async loadURL(url) { this.urls.push(url); }
   show() { this.shown++; }
+  setTitleBarOverlay(options) { this.overlayUpdates.push(options); }
   reload() { this.reloads++; }
   isDestroyed() { return false; }
+  isFullScreen() { return this.fullscreen; }
 }
 `;
 
-function runMain(check) {
+function runMain(check, platform = process.platform) {
   const mockUrl = `data:text/javascript,${encodeURIComponent(mock)}`;
   const script = `
     import assert from 'node:assert/strict';
@@ -47,6 +51,7 @@ function runMain(check) {
       return specifier === 'electron' ? { url: ${JSON.stringify(mockUrl)}, shortCircuit: true } : next(specifier, context);
     }});
     const { app, BrowserWindow, dialog, shell } = await import('electron');
+    Object.defineProperty(process, 'platform', { value: ${JSON.stringify(platform)} });
     await import(${JSON.stringify(mainUrl)});
     await setImmediate();
     const window = BrowserWindow.windows[0];
@@ -64,6 +69,52 @@ test("desktop waits for its first paint before showing the window", () => {
     assert.equal(window.options.webPreferences.nodeIntegration, false);
     assert.equal(window.options.webPreferences.sandbox, true);
   `);
+});
+
+test("Windows overlays native window controls without a preload or renderer Node integration", () => {
+  runMain(`
+    assert.equal(window.options.titleBarStyle, 'hidden');
+    assert.deepEqual(window.options.titleBarOverlay, { color: '#f8f7ff', symbolColor: '#1d1e21', height: 40 });
+    assert.equal(window.options.webPreferences.preload, undefined);
+    assert.equal(window.options.webPreferences.nodeIntegration, false);
+    assert.equal(window.options.webPreferences.contextIsolation, true);
+  `, 'win32');
+});
+
+test("non-Windows platforms retain their native title bar", () => {
+  for (const platform of ['darwin', 'linux']) {
+    runMain(`
+      assert.equal(window.options.titleBarStyle, undefined);
+      assert.equal(window.options.titleBarOverlay, undefined);
+      assert.equal(window.webContents.listenerCount('did-change-theme-color'), 0);
+    `, platform);
+  }
+});
+
+test("native fullscreen state is synchronized on transitions and page reload", () => {
+  runMain(`
+    window.webContents.emit('dom-ready');
+    assert.match(window.webContents.scripts.at(-1), /data-native-fullscreen.*, false/);
+    window.fullscreen = true;
+    window.emit('enter-full-screen');
+    assert.match(window.webContents.scripts.at(-1), /data-native-fullscreen.*, true/);
+    window.webContents.emit('dom-ready');
+    assert.match(window.webContents.scripts.at(-1), /data-native-fullscreen.*, true/);
+    window.fullscreen = false;
+    window.emit('leave-full-screen');
+    assert.match(window.webContents.scripts.at(-1), /data-native-fullscreen.*, false/);
+  `, 'win32');
+});
+
+test("theme-color metadata updates native button colors with readable contrast", () => {
+  runMain(`
+    window.webContents.emit('did-change-theme-color', {}, '#2e2e2e');
+    assert.deepEqual(window.overlayUpdates.at(-1), { color: '#2e2e2e', symbolColor: '#f0f1f2' });
+    window.webContents.emit('did-change-theme-color', {}, '#f8f7ff');
+    assert.deepEqual(window.overlayUpdates.at(-1), { color: '#f8f7ff', symbolColor: '#1d1e21' });
+    window.webContents.emit('did-change-theme-color', {}, null);
+    assert.equal(window.overlayUpdates.length, 2);
+  `, 'win32');
 });
 
 test("full-history popups open in the browser without replacing the application", () => {

@@ -31,9 +31,9 @@ test("sidebar collapse lives in the sidebar while the chat opener only appears w
   assert.match(styles, /--app-top-bar-offset: 4px;/);
   assert.match(styles, /\.session-sidebar-header\s*\{\s*padding: var\(--app-top-bar-offset\) 10px 15px;/);
   assert.match(source, /ref=\{topBarRef\}[^\n]*marginTop: "var\(--app-top-bar-offset\)"/);
-  assert.match(source, /position: "fixed", top: "var\(--app-top-bar-offset\)", right: 0/);
-  const headerRow = styles.match(/\.session-sidebar-header-row\s*\{([^}]*)\}/)?.[1];
-  const collapseButton = styles.match(/\.sidebar-collapse-button\s*\{([^}]*)\}/)?.[1];
+  assert.match(source, /position: "fixed", top: "var\(--app-window-toggle-top, var\(--app-top-bar-offset\)\)", right: "var\(--app-window-controls-inset, 0px\)"/);
+  const headerRow = styles.match(/^\.session-sidebar-header-row\s*\{([^}]*)\}/m)?.[1];
+  const collapseButton = styles.match(/^\.sidebar-collapse-button\s*\{([^}]*)\}/m)?.[1];
   assert.ok(headerRow);
   assert.ok(collapseButton);
   assert.match(headerRow, /display: flex;\s*align-items: center;/);
@@ -41,6 +41,22 @@ test("sidebar collapse lives in the sidebar while the chat opener only appears w
   assert.match(headerRow, /margin-bottom: 24px;/);
   assert.match(collapseButton, /width: 36px;\s*height: 36px;/);
   assert.doesNotMatch(collapseButton, /position:|\btop:|transform:/);
+});
+
+test("desktop titlebar layout uses overlay geometry while Web retains its original dimensions", async () => {
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  const tabs = await readFile(new URL("./TabBar.tsx", import.meta.url), "utf8");
+  assert.match(source, /useLayoutEffect\(bindWindowControlsOverlay, \[\]\)/);
+  assert.match(source, /height: "var\(--app-titlebar-height, 36px\)"/);
+  assert.match(source, /paddingRight: rightPanelOpen \? 0 : "var\(--app-window-controls-inset, 0px\)"/);
+  assert.match(styles, /html\[data-window-controls-overlay\]:not\(\[data-native-fullscreen\]\)\s*\{[^}]*env\(titlebar-area-height, 40px\)/);
+  assert.match(styles, /env\(titlebar-area-width, 100vw\)/);
+  assert.match(styles, /--app-titlebar-button-height: min\(36px, var\(--app-titlebar-height\)\)/);
+  assert.equal([...source.matchAll(/height: "var\(--app-titlebar-button-height, 36px\)"/g)].length, 2);
+  assert.match(styles, /padding-right: calc\(36px \+ var\(--app-window-controls-inset\)\)/);
+  assert.match(styles, /\.file-tab\)[\s\S]*?-webkit-app-region: no-drag;/);
+  assert.match(tabs, /className="file-tab"/);
+  assert.match(tabs, /height: "var\(--app-titlebar-height, 36px\)"/);
 });
 
 test("closing the right panel or collapsing Explorer keeps the file tree mounted", () => {

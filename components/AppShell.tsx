@@ -22,6 +22,7 @@ import { copyText } from "@/lib/clipboard";
 import { getFileName, getRelativeFilePath } from "@/lib/file-paths";
 import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import { getInitialNavigation } from "@/lib/initial-navigation";
+import { bindWindowControlsOverlay } from "@/lib/window-controls-overlay";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ProjectTrustStatus } from "@/lib/api-types";
 import type { ChatInputHandle } from "./ChatInput";
@@ -52,6 +53,7 @@ const EXPLORER_COLLAPSED_WIDTH = 33;
 const SESSION_DIAGNOSTICS_STORAGE_KEY = "pi-web:session-diagnostics";
 
 export function AppShell() {
+  useLayoutEffect(bindWindowControlsOverlay, []);
   const router = useRouter();
   const searchParams = useSearchParams();
   const [initialNavigation] = useState(() => getInitialNavigation(searchParams));
@@ -913,7 +915,7 @@ export function AppShell() {
       {/* Center: chat */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         {/* Top bar with sidebar opener */}
-        <div ref={topBarRef} style={{ display: "flex", alignItems: "center", flexShrink: 0, height: 36, marginTop: "var(--app-top-bar-offset)" }}>
+        <div ref={topBarRef} className="app-top-bar" style={{ display: "flex", alignItems: "center", flexShrink: 0, height: "var(--app-titlebar-height, 36px)", marginTop: "var(--app-top-bar-offset)", paddingRight: rightPanelOpen ? 0 : "var(--app-window-controls-inset, 0px)" }}>
           {!sidebarOpen && (
             <button
               type="button"
@@ -922,7 +924,7 @@ export function AppShell() {
               aria-expanded={false}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
-                width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
+                width: TOP_BAR_ICON_BUTTON_SIZE, height: "var(--app-titlebar-button-height, 36px)", padding: 0,
                 background: "none", border: "none",
                 color: "var(--text-muted)", cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
               }}
@@ -978,7 +980,7 @@ export function AppShell() {
             </button>
           )}
           {showChat && showSessionDiagnostics && (
-            <div style={{
+            <div className="app-top-bar-actions" style={{
               display: "flex",
               alignItems: "stretch",
               height: "100%",
@@ -1558,13 +1560,14 @@ export function AppShell() {
     </div>
     {/* File panel toggle — always visible at top-right */}
     <button
+      className="workspace-panel-toggle"
       onClick={() => setRightPanelOpen((v) => !v)}
        title={rightPanelOpen ? translate("files.hidePanel") : translate("files.showPanel")}
        aria-label={rightPanelOpen ? translate("files.hidePanel") : translate("files.showPanel")}
       style={{
-        position: "fixed", top: "var(--app-top-bar-offset)", right: 0, zIndex: 300,
+        position: "fixed", top: "var(--app-window-toggle-top, var(--app-top-bar-offset))", right: "var(--app-window-controls-inset, 0px)", zIndex: 300,
         display: "flex", alignItems: "center", justifyContent: "center",
-        width: 36, height: 36, padding: 0,
+        width: 36, height: "var(--app-titlebar-button-height, 36px)", padding: 0,
         background: "transparent", border: "none",
         color: rightPanelOpen ? "var(--text)" : "var(--text-muted)",
         cursor: "pointer", transition: "color 0.12s",
