@@ -9,7 +9,7 @@ import nodeVersion from "../bin/node-version.js";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const require = createRequire(import.meta.url);
-const inputs = ["app", "components", "hooks", "lib", "public", "instrumentation.ts", "proxy.ts", "postcss.config.mjs", "tailwind.config.ts", "tsconfig.json", "next-env.d.ts", "next.config.ts", "package.json", "package-lock.json", "LICENSE", "electron/build.mjs", "electron/packages.mjs"];
+const inputs = ["app", "components", "hooks", "lib", "public", "instrumentation.ts", "proxy.ts", "postcss.config.mjs", "tailwind.config.ts", "tsconfig.json", "next.config.ts", "package.json", "package-lock.json", "LICENSE", "electron/build.mjs", "electron/packages.mjs"];
 
 export async function fingerprint(base, paths = inputs) {
   const hash = createHash("sha256");

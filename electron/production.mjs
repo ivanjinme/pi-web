@@ -20,7 +20,7 @@ export function resolveSystemNode(env = process.env) {
   return node.executable;
 }
 
-export async function startProductionServer({ resourcesPath, logsPath, url, onUnexpectedExit }) {
+export async function startProductionServer({ resourcesPath, logsPath, url, onUnexpectedExit, signal }) {
   const root = join(resourcesPath, "server");
   if (!existsSync(join(root, ".next", "BUILD_ID"))) throw new Error("安装包缺少 Web 生产构建，请重新安装 Weclio。");
   const runtime = join(resourcesPath, "runtime", "win-x64");
@@ -43,14 +43,27 @@ export async function startProductionServer({ resourcesPath, logsPath, url, onUn
     catch (error) { console.error(`[desktop] 无法保存服务日志: ${error.message}`); }
   };
   // 在系统 Node 中运行初始化，避免 Electron 的 ASAR/模块解析影响 CLI 与扩展。
-  const bootstrap = spawnSync(node, [join(root, "desktop-packages.mjs")], {
-    cwd: root, env, encoding: "utf8", windowsHide: true, timeout: 30_000,
+  signal?.throwIfAborted();
+  await new Promise((resolve, reject) => {
+    const bootstrap = spawn(node, [join(root, "desktop-packages.mjs")], {
+      cwd: root, env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"], timeout: 120_000, signal,
+    });
+    let output = "";
+    let failure;
+    bootstrap.stdout.on("data", record);
+    bootstrap.stderr.on("data", (chunk) => {
+      record(chunk);
+      output = (output + chunk.toString()).slice(-8192);
+    });
+    bootstrap.once("error", (error) => { failure = error; });
+    // 等待 close，确保取消或超时后初始化进程已结束，再允许重试。
+    bootstrap.once("close", (code) => {
+      if (!failure && code === 0) return resolve();
+      const message = failure?.message ?? (bootstrap.killed ? "初始化超时，请重新打开 Weclio 重试。" : output || `退出码 ${code}`);
+      reject(new Error(`内置包初始化失败: ${message}\n服务日志: ${logFile}`));
+    });
   });
-  if (bootstrap.stdout) record(bootstrap.stdout);
-  if (bootstrap.stderr) record(bootstrap.stderr);
-  if (bootstrap.error || bootstrap.status !== 0) {
-    throw new Error(`内置包初始化失败: ${bootstrap.error?.message ?? bootstrap.stderr ?? bootstrap.status}\n服务日志: ${logFile}`);
-  }
+  signal?.throwIfAborted();
   const require = createRequire(import.meta.url);
   const next = require.resolve(join(root, "node_modules", "next", "dist", "bin", "next"));
   const child = spawn(node, [next, "start", "-H", "127.0.0.1", "-p", String(port)], {
@@ -66,6 +79,7 @@ export async function startProductionServer({ resourcesPath, logsPath, url, onUn
     stopping = true;
     controller.abort();
     process.off("exit", stop);
+    signal?.removeEventListener("abort", stop);
     if (!child.pid) return;
     if (process.platform === "win32") {
       if (child.exitCode !== null || child.signalCode !== null) return;
@@ -91,6 +105,8 @@ export async function startProductionServer({ resourcesPath, logsPath, url, onUn
   };
   child.once("error", failed);
   child.once("exit", (code, signal) => failed(new Error(`Web 服务已退出 (${code ?? signal})。日志: ${logFile}`)));
+  signal?.addEventListener("abort", stop, { once: true });
+  if (signal?.aborted) stop();
   try {
     await waitForServer(url, {
       signal: controller.signal,

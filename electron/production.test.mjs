@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
-import { resolveSystemNode } from "./production.mjs";
+import { resolveSystemNode, startProductionServer } from "./production.mjs";
 import { createRuntimeEnvironment } from "./runtime.mjs";
 
 const runtime = resolve("resources/runtime/win-x64");
@@ -47,15 +47,19 @@ test("production initializes bundled packages before Next and never initializes 
     await writeFile(join(resources, file), "fixture");
   }
   const mock = `
-    export function spawn() { throw Error('Next must not start after failed bootstrap'); }
-    export function spawnSync(command, args, options) {
+    import {EventEmitter} from 'node:events';
+    export function spawn(command, args, options) {
+      if(!args[0].endsWith('desktop-packages.mjs'))throw Error('Next must not start after failed bootstrap');
+      globalThis.bootstrapCalls=(globalThis.bootstrapCalls??0)+1;
+      if(options.cwd!==${JSON.stringify(join(resources, "server"))})throw Error('Wrong bootstrap root');
+      if(options.timeout!==120000)throw Error('Initialization timeout must allow slow first use');
+      const child=Object.assign(new EventEmitter(),{stdout:new EventEmitter(),stderr:new EventEmitter()});
+      setImmediate(()=>{child.stderr.emit('data','fixture initialization failure');child.emit('close',1);});
+      return child;
+    }
+    export function spawnSync(command, args) {
       if (args[0] === '-p') return {status:0,stdout:JSON.stringify({executable:process.execPath,version:process.versions.node,arch:'x64'})};
       if (args[0].endsWith('npm-cli.js')) return {status:0,stdout:'11.0.0'};
-      if (args[0].endsWith('desktop-packages.mjs')) {
-        globalThis.bootstrapCalls=(globalThis.bootstrapCalls??0)+1;
-        if(options.cwd!==${JSON.stringify(join(resources, "server"))}) throw Error('Wrong bootstrap root');
-        return {status:1,stderr:'fixture initialization failure'};
-      }
       throw Error('Unexpected process');
     }
   `;
@@ -80,6 +84,30 @@ test("production initializes bundled packages before Next and never initializes 
     assert.equal(globalThis.bootstrapCalls,1);
   `;
   execFileSync(process.execPath, ["--input-type=module", "-e", script], { stdio: "pipe", timeout: 20_000 });
+});
+
+test("cancelling first startup terminates its initializer before returning", async (t) => {
+  const resources = await mkdtemp(join(tmpdir(), "weclio-cancel-bootstrap-"));
+  t.after(() => rm(resources, { recursive: true, force: true }));
+  for (const file of ["server/.next/BUILD_ID", "runtime/win-x64/git/bin/bash.exe", "runtime/win-x64/git/cmd/git.exe", "runtime/win-x64/tools/rg.exe", "runtime/win-x64/tools/fd.exe"]) {
+    await mkdir(dirname(join(resources, file)), { recursive: true });
+    await writeFile(join(resources, file), "fixture");
+  }
+  const pidFile = join(resources, "initializer-pid");
+  await writeFile(join(resources, "server/desktop-packages.mjs"), `import {writeFileSync} from 'node:fs';writeFileSync(${JSON.stringify(pidFile)},String(process.pid));setInterval(()=>{},1000);`);
+  const controller = new AbortController();
+  const result = startProductionServer({ resourcesPath: resources, logsPath: join(resources, "logs"), url: "http://127.0.0.1:0", signal: controller.signal }).catch((error) => error);
+  try {
+    for (let attempt = 0; attempt < 200 && !existsSync(pidFile); attempt++) await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(existsSync(pidFile), true);
+    const pid = Number(await readFile(pidFile, "utf8"));
+    controller.abort();
+    assert.match((await result).message, /内置包初始化失败/);
+    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  } finally {
+    controller.abort();
+    await result;
+  }
 });
 
 test("with no system Git, Pi discovers bundled Bash, rg and fd through only the child PATH", {

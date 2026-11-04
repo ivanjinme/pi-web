@@ -41,7 +41,7 @@ export class BrowserWindow extends EventEmitter {
 }
 `;
 
-function runMain(check, platform = process.platform, packaged = false) {
+function runMain(check, platform = process.platform, packaged = false, pending = false) {
   const mockUrl = `data:text/javascript,${encodeURIComponent(mock)}`;
   const productionUrl = `data:text/javascript,${encodeURIComponent(`
     import assert from 'node:assert/strict';
@@ -49,8 +49,10 @@ function runMain(check, platform = process.platform, packaged = false) {
     export const starts = [];
     export let stops = 0;
     export async function startProductionServer(options) {
-      assert.equal(BrowserWindow.windows.length, 0);
+      assert.equal(BrowserWindow.windows.length, 1);
+      assert.ok(BrowserWindow.windows[0].urls[0].startsWith('data:text/html'));
       starts.push(options);
+      if (${pending}) await new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(Error('startup cancelled')),{once:true}));
       return { stop() { stops++; } };
     }
   `)}`;
@@ -158,15 +160,30 @@ test("external HTTP links open in the browser while unsafe popup schemes stay bl
   `);
 });
 
-test("packaged mode starts its owned service before creating a window and stops it on quit", () => {
+test("packaged mode shows initialization before starting its service and stops it on quit", () => {
   runMain(`
     assert.equal(production.starts.length, 1);
     assert.equal(production.starts[0].resourcesPath, 'test-resources');
     assert.equal(production.starts[0].logsPath, 'test-logs');
-    assert.equal(production.starts[0].url, window.urls[0]);
+    assert.match(decodeURIComponent(window.urls[0]), /正在启动 Weclio/);
+    assert.equal(production.starts[0].url, window.urls[1]);
+    assert.equal(production.starts[0].signal.aborted, false);
     app.emit('before-quit');
     assert.equal(production.stops, 1);
+    assert.equal(production.starts[0].signal.aborted, true);
   `, 'win32', true);
+});
+
+test("closing the startup window cancels initialization without a failure dialog", () => {
+  runMain(`
+    assert.equal(window.urls.length, 1);
+    app.emit('before-quit');
+    await setImmediate();
+    assert.equal(production.starts[0].signal.aborted, true);
+    assert.equal(window.urls.length, 1);
+    assert.deepEqual(dialog.errors, []);
+    assert.deepEqual(app.exits, []);
+  `, 'win32', true, true);
 });
 
 test("a packaged service failure reports the error and cleans up before exit", () => {

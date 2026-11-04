@@ -5,6 +5,8 @@ import { startProductionServer } from "./production.mjs";
 app.setName("Weclio");
 let mainWindow = null;
 let service = null;
+let quitting = false;
+const startup = new AbortController();
 
 function showError(message) {
   service?.stop();
@@ -16,21 +18,15 @@ function showError(message) {
 app.on("window-all-closed", () => app.quit());
 app.on("before-quit", () => {
   console.log("[desktop] 正在退出。");
+  quitting = true;
   service?.stop();
+  startup.abort();
 });
 app.on("child-process-gone", (_event, details) => {
   console.error(`[desktop] ${details.type} 进程退出: ${details.reason} (${details.exitCode})`);
 });
 
 app.whenReady().then(async () => {
-  if (app.isPackaged) {
-    service = await startProductionServer({
-      resourcesPath: process.resourcesPath,
-      logsPath: app.getPath("logs"),
-      url: SERVER_URL,
-      onUnexpectedExit: (error) => showError(error.message),
-    });
-  }
   const window = new BrowserWindow({
     title: "Weclio",
     width: 1440,
@@ -124,5 +120,17 @@ app.whenReady().then(async () => {
       else app.quit();
     }).catch((error) => console.error("[desktop] 无法显示恢复提示:", error));
   });
-  await window.loadURL(SERVER_URL);
-}).catch((error) => showError(error.message));
+  if (app.isPackaged) {
+    // 先显示可关闭的启动页；异步初始化不能让慢磁盘上的首次启动看起来毫无响应。
+    const html = '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Weclio</title><style>body{margin:0;background:#f8f7ff;color:#1d1e21;font:16px system-ui;display:grid;place-content:center;min-height:100vh}h1{font-size:24px;font-weight:500}p{color:#625e70}</style><main role="status"><h1>正在启动 Weclio</h1><p>首次打开需要准备内置扩展与技能，请稍候。</p></main></html>';
+    await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    service = await startProductionServer({
+      resourcesPath: process.resourcesPath,
+      logsPath: app.getPath("logs"),
+      url: SERVER_URL,
+      signal: startup.signal,
+      onUnexpectedExit: (error) => showError(error.message),
+    });
+  }
+  if (!quitting) await window.loadURL(SERVER_URL);
+}).catch((error) => { if (!quitting) showError(error.message); });

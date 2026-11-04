@@ -1,10 +1,11 @@
-export const SERVER_URL = process.env.WECLIO_DESKTOP_URL ?? `http://127.0.0.1:${process.env.PORT ?? 8888}`;
+const address = process.env.WECLIO_DESKTOP_URL ?? `http://127.0.0.1:${process.env.PORT ?? 8888}`;
 
-// 桌面只加载由本地启动器提供的 loopback 服务。
-const server = new URL(SERVER_URL);
-if (server.protocol !== "http:" || server.hostname !== "127.0.0.1" || server.origin !== SERVER_URL) {
+// 仍只接受裸 loopback origin；显式 :80 会被 URL 标准化省略。
+const server = new URL(address);
+if (server.protocol !== "http:" || server.hostname !== "127.0.0.1" || (server.origin !== address && `${server.origin}:80` !== address)) {
   throw new Error("桌面服务地址必须是 http://127.0.0.1:<port>。");
 }
+export const SERVER_URL = server.origin;
 
 export function isAppUrl(value) {
   try {

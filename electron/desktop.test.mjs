@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import http from "node:http";
 import { test } from "node:test";
@@ -22,9 +22,24 @@ test("desktop defaults to the shared web port and accepts a launcher-provided or
   const script = `import { SERVER_URL } from ${JSON.stringify(moduleUrl)}; process.stdout.write(SERVER_URL);`;
   const env = { ...process.env };
   delete env.WECLIO_DESKTOP_URL;
+  delete env.PORT;
   assert.equal(execFileSync(process.execPath, ["--input-type=module", "-e", script], { env, encoding: "utf8" }), "http://127.0.0.1:8888");
   env.WECLIO_DESKTOP_URL = "http://127.0.0.1:49152";
   assert.equal(execFileSync(process.execPath, ["--input-type=module", "-e", script], { env, encoding: "utf8" }), env.WECLIO_DESKTOP_URL);
+});
+
+test("port 80 is canonicalized without accepting paths, credentials or external origins", () => {
+  const moduleUrl = new URL("./navigation.mjs", import.meta.url).href;
+  const script = `import {SERVER_URL,isAppUrl} from ${JSON.stringify(moduleUrl)};process.stdout.write(JSON.stringify([SERVER_URL,isAppUrl('http://127.0.0.1:80/test')]));`;
+  const env = { ...process.env, PORT: "80" };
+  delete env.WECLIO_DESKTOP_URL;
+  assert.deepEqual(JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], { env, encoding: "utf8" })), ["http://127.0.0.1", true]);
+  env.WECLIO_DESKTOP_URL = "http://127.0.0.1:80";
+  assert.deepEqual(JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], { env, encoding: "utf8" })), ["http://127.0.0.1", true]);
+  for (const address of ["http://example.com:80", "http://localhost:80", "https://127.0.0.1:80", "http://user:password@127.0.0.1:80", "http://127.0.0.1:80/path", "http://127.0.0.1:80?query=1", "http://127.0.0.1:80#hash"]) {
+    env.WECLIO_DESKTOP_URL = address;
+    assert.notEqual(spawnSync(process.execPath, ["--input-type=module", "-e", script], { env, encoding: "utf8" }).status, 0, address);
+  }
 });
 
 test("only the exact application origin may navigate inside the desktop", () => {
@@ -89,6 +104,24 @@ test("startup has a bounded timeout", async () => {
     isReady: () => true,
     timeout: 50,
   }), /未就绪/);
+});
+
+test("a streaming response cannot bypass the total startup deadline", async (t) => {
+  const { url } = await serve(t, (_request, response) => {
+    response.writeHead(200);
+    response.write("partial HTML");
+    const timer = setInterval(() => response.write(" "), 10);
+    response.once("close", () => clearInterval(timer));
+  });
+  const controller = new AbortController();
+  const safety = setTimeout(() => controller.abort(), 2000);
+  const start = Date.now();
+  try {
+    await assert.rejects(waitForServer(url, { signal: controller.signal, isReady: () => true, timeout: 100 }), /未就绪/);
+    assert.ok(Date.now() - start < 1500);
+  } finally {
+    clearTimeout(safety);
+  }
 });
 
 test("shutdown aborts startup polling", async () => {

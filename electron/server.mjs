@@ -27,11 +27,16 @@ function responds(url, signal) {
 }
 
 export async function waitForServer(url, { signal, isReady, timeout = 120_000 }) {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    signal.throwIfAborted();
-    if (isReady() && await responds(url, signal)) return;
-    await delay(250, undefined, { signal });
+  const deadline = AbortSignal.timeout(timeout);
+  const combined = AbortSignal.any([signal, deadline]);
+  try {
+    while (true) {
+      combined.throwIfAborted();
+      if (isReady() && await responds(url, combined)) return;
+      await delay(250, undefined, { signal: combined });
+    }
+  } catch (error) {
+    if (!signal.aborted && deadline.aborted) throw new Error(`Next 服务在 ${timeout / 1000} 秒内未就绪，请检查上方服务日志。`);
+    throw error;
   }
-  throw new Error(`Next 服务在 ${timeout / 1000} 秒内未就绪，请检查上方服务日志。`);
 }
