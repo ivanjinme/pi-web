@@ -32,6 +32,10 @@
     "dev:desktop": "node electron/dev.mjs",
     "dev:web": "next dev -H 127.0.0.1 -p 8888",
     "dev:lan": "next dev -H 0.0.0.0 -p 8888",
+    "build:desktop": "node electron/build.mjs",
+    "pack:desktop": "npm run build:desktop && electron-builder --config electron/builder.json --win --x64 --dir",
+    "dist:desktop": "npm run build:desktop && electron-builder --config electron/builder.json --win --x64",
+    "release:desktop": "node electron/release.mjs",
     "build": "next build --webpack",
     "start": "next start -H 127.0.0.1 -p 8888",
     "start:lan": "next start -H 0.0.0.0 -p 8888",
@@ -53,11 +57,13 @@
     "@earendil-works/pi-coding-agent": "1.4.0",
     "@earendil-works/pi-tui": "1.4.0",
     "@mdxeditor/editor": "4.3.2",
+    "@weclio/plugins": "0.1.5",
     "codemirror": "6.0.2",
     "next": "16.3.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "undici": "8.10.0"
+    "undici": "8.10.0",
+    "weclio-cli": "0.3.6"
   },
   "devDependencies": {
     "@lobehub/icons": "^5.6.0",
@@ -67,6 +73,7 @@
     "@types/react-dom": "^19",
     "@types/react-syntax-highlighter": "^15.5.13",
     "electron": "45.2.1",
+    "electron-builder": "26.18.0",
     "eslint": "^9",
     "eslint-config-next": "16.3.3",
     "jiti": "^2.7.0",

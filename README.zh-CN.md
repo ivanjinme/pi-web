@@ -57,7 +57,7 @@ node_modules/.bin/tsc --noEmit
 npm run lint
 ```
 
-本地开发不要跑 `next build`——会干扰 dev server。构建交给 CI。
+不要在项目根目录跑 `next build`——会干扰 dev server。桌面打包命令见 `COMMANDS.md`，构建输出与开发目录隔离。
 
 ## 许可
 

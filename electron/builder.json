@@ -1,0 +1,55 @@
+{
+  "appId": "com.weclio.desktop",
+  "productName": "Weclio",
+  "directories": {
+    "output": "build/desktop/dist",
+    "buildResources": "public/brand"
+  },
+  "files": [
+    "electron/main.mjs",
+    "electron/navigation.mjs",
+    "electron/production.mjs",
+    "electron/runtime.mjs",
+    "electron/server.mjs",
+    "bin/node-version.js",
+    "LICENSE",
+    "!node_modules/**/*"
+  ],
+  "extraMetadata": {
+    "main": "electron/main.mjs",
+    "description": "Weclio - Build an AI Scientist"
+  },
+  "extraResources": [
+    {
+      "from": "build/desktop/server",
+      "to": "server",
+      "filter": ["package.json", "next.config.js", "desktop-packages.mjs", "LICENSE", "public/**/*", ".next/**/*", "!.next/cache/**/*"]
+    },
+    {
+      "from": "build/desktop/server/node_modules",
+      "to": "server/node_modules"
+    },
+    {
+      "from": "resources/runtime/win-x64",
+      "to": "runtime/win-x64",
+      "filter": ["git/**/*", "tools/**/*"]
+    }
+  ],
+  "electronDist": "node_modules/electron/dist",
+  "asar": true,
+  "npmRebuild": false,
+  "publish": null,
+  "win": {
+    "target": [{ "target": "nsis", "arch": ["x64"] }],
+    "icon": "public/brand/weclio-favicon.ico",
+    "signAndEditExecutable": false,
+    "artifactName": "Weclio-${version}-${arch}-Setup.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": false,
+    "runAfterFinish": false
+  }
+}

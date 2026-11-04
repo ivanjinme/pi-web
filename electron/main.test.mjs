@@ -7,7 +7,7 @@ const mock = `
 import { EventEmitter } from 'node:events';
 export const app = Object.assign(new EventEmitter(), {
   exits: [], quits: 0,
-  setName() {}, whenReady: async () => {},
+  setName() {}, whenReady: async () => {}, getPath: () => 'test-logs',
   exit(code) { this.exits.push(code); },
   quit() { this.quits++; }
 });
@@ -41,16 +41,32 @@ export class BrowserWindow extends EventEmitter {
 }
 `;
 
-function runMain(check, platform = process.platform) {
+function runMain(check, platform = process.platform, packaged = false) {
   const mockUrl = `data:text/javascript,${encodeURIComponent(mock)}`;
+  const productionUrl = `data:text/javascript,${encodeURIComponent(`
+    import assert from 'node:assert/strict';
+    import { BrowserWindow } from 'electron';
+    export const starts = [];
+    export let stops = 0;
+    export async function startProductionServer(options) {
+      assert.equal(BrowserWindow.windows.length, 0);
+      starts.push(options);
+      return { stop() { stops++; } };
+    }
+  `)}`;
   const script = `
     import assert from 'node:assert/strict';
     import { registerHooks } from 'node:module';
     import { setImmediate } from 'node:timers/promises';
     registerHooks({ resolve(specifier, context, next) {
-      return specifier === 'electron' ? { url: ${JSON.stringify(mockUrl)}, shortCircuit: true } : next(specifier, context);
+      if (specifier === 'electron') return { url: ${JSON.stringify(mockUrl)}, shortCircuit: true };
+      if (${packaged} && specifier === './production.mjs') return { url: ${JSON.stringify(productionUrl)}, shortCircuit: true };
+      return next(specifier, context);
     }});
     const { app, BrowserWindow, dialog, shell } = await import('electron');
+    const production = ${packaged} ? await import(${JSON.stringify(productionUrl)}) : null;
+    app.isPackaged = ${packaged};
+    process.resourcesPath = 'test-resources';
     Object.defineProperty(process, 'platform', { value: ${JSON.stringify(platform)} });
     await import(${JSON.stringify(mainUrl)});
     await setImmediate();
@@ -140,6 +156,26 @@ test("external HTTP links open in the browser while unsafe popup schemes stay bl
     assert.deepEqual(shell.opened, [url]);
     assert.equal(window.urls.length, 1);
   `);
+});
+
+test("packaged mode starts its owned service before creating a window and stops it on quit", () => {
+  runMain(`
+    assert.equal(production.starts.length, 1);
+    assert.equal(production.starts[0].resourcesPath, 'test-resources');
+    assert.equal(production.starts[0].logsPath, 'test-logs');
+    assert.equal(production.starts[0].url, window.urls[0]);
+    app.emit('before-quit');
+    assert.equal(production.stops, 1);
+  `, 'win32', true);
+});
+
+test("a packaged service failure reports the error and cleans up before exit", () => {
+  runMain(`
+    production.starts[0].onUnexpectedExit(new Error('service failed'));
+    assert.deepEqual(app.exits, [1]);
+    assert.equal(production.stops, 1);
+    assert.match(dialog.errors[0][1], /service failed/);
+  `, 'win32', true);
 });
 
 test("a clean renderer exit does not terminate the desktop", () => {

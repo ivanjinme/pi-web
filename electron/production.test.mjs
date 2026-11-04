@@ -1,0 +1,111 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { test } from "node:test";
+import { resolveSystemNode } from "./production.mjs";
+import { createRuntimeEnvironment } from "./runtime.mjs";
+
+const runtime = resolve("resources/runtime/win-x64");
+
+test("production resolves an installed Node and npm without using Electron as Node", () => {
+  assert.equal(resolveSystemNode(), process.execPath);
+});
+
+test("missing system Node produces an actionable installation error", async (t) => {
+  const empty = await mkdtemp(join(tmpdir(), "weclio-no-node-"));
+  t.after(() => rm(empty, { recursive: true, force: true }));
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (key.toLowerCase() === "path") delete env[key];
+  env.PATH = empty;
+  assert.throws(() => resolveSystemNode(env), /请安装 Node.js 22.19\+/);
+});
+
+test("unsupported Node versions and missing npm are rejected before launching the service", () => {
+  for (const [version, expected] of [["22.18.0", /22\.19\.0/], ["24.0.0", /缺少 npm/]]) {
+    const mock = `export function spawn() { throw new Error('Service must not start'); } export function spawnSync() { return {status:0,stdout:JSON.stringify({version:${JSON.stringify(version)},executable:'C:/missing-node/node.exe',arch:'x64'})}; }`;
+    const script = `
+      import assert from 'node:assert/strict';
+      import { registerHooks } from 'node:module';
+      registerHooks({resolve(name, context, next) {
+        return name === 'node:child_process' ? {url:${JSON.stringify(`data:text/javascript,${encodeURIComponent(mock)}`)},shortCircuit:true} : next(name, context);
+      }});
+      const { resolveSystemNode } = await import(${JSON.stringify(new URL("./production.mjs", import.meta.url).href)});
+      assert.throws(() => resolveSystemNode(), ${expected});
+    `;
+    execFileSync(process.execPath, ["--input-type=module", "-e", script], { stdio: "pipe" });
+  }
+});
+
+test("production initializes bundled packages before Next and never initializes against an occupied port", async (t) => {
+  const resources = await mkdtemp(join(tmpdir(), "weclio-bootstrap-order-"));
+  t.after(() => rm(resources, { recursive: true, force: true }));
+  for (const file of ["server/.next/BUILD_ID", "runtime/win-x64/git/bin/bash.exe", "runtime/win-x64/git/cmd/git.exe", "runtime/win-x64/tools/rg.exe", "runtime/win-x64/tools/fd.exe"]) {
+    await mkdir(dirname(join(resources, file)), { recursive: true });
+    await writeFile(join(resources, file), "fixture");
+  }
+  const mock = `
+    export function spawn() { throw Error('Next must not start after failed bootstrap'); }
+    export function spawnSync(command, args, options) {
+      if (args[0] === '-p') return {status:0,stdout:JSON.stringify({executable:process.execPath,version:process.versions.node,arch:'x64'})};
+      if (args[0].endsWith('npm-cli.js')) return {status:0,stdout:'11.0.0'};
+      if (args[0].endsWith('desktop-packages.mjs')) {
+        globalThis.bootstrapCalls=(globalThis.bootstrapCalls??0)+1;
+        if(options.cwd!==${JSON.stringify(join(resources, "server"))}) throw Error('Wrong bootstrap root');
+        return {status:1,stderr:'fixture initialization failure'};
+      }
+      throw Error('Unexpected process');
+    }
+  `;
+  const script = `
+    import assert from 'node:assert/strict';
+    import http from 'node:http';
+    import {once} from 'node:events';
+    import {registerHooks} from 'node:module';
+    registerHooks({resolve(name, context, next) {
+      return name==='node:child_process'?{url:${JSON.stringify(`data:text/javascript,${encodeURIComponent(mock)}`)},shortCircuit:true}:next(name,context);
+    }});
+    const {startProductionServer}=await import(${JSON.stringify(new URL("./production.mjs", import.meta.url).href)});
+    const server=http.createServer((_req,res)=>res.end('existing'));
+    server.listen(0,'127.0.0.1');await once(server,'listening');
+    const url='http://127.0.0.1:'+server.address().port;
+    const options={resourcesPath:${JSON.stringify(resources)},logsPath:${JSON.stringify(join(resources, "logs"))},url};
+    await assert.rejects(startProductionServer(options),/已被占用/);
+    assert.equal(globalThis.bootstrapCalls,undefined);
+    assert.equal(await(await fetch(url)).text(),'existing');
+    await new Promise(resolve=>{server.close(resolve);server.closeAllConnections();});
+    await assert.rejects(startProductionServer(options),/内置包初始化失败.*fixture initialization failure/);
+    assert.equal(globalThis.bootstrapCalls,1);
+  `;
+  execFileSync(process.execPath, ["--input-type=module", "-e", script], { stdio: "pipe", timeout: 20_000 });
+});
+
+test("with no system Git, Pi discovers bundled Bash, rg and fd through only the child PATH", {
+  skip: process.platform !== "win32" || !existsSync(join(runtime, "git/bin/bash.exe")),
+}, async (t) => {
+  const agent = await mkdtemp(join(tmpdir(), "weclio-runtime-agent-"));
+  t.after(() => rm(agent, { recursive: true, force: true }));
+  const base = { ...process.env };
+  for (const key of Object.keys(base)) if (key.toLowerCase() === "path") delete base[key];
+  Object.assign(base, {
+    PATH: `${dirname(process.execPath)};${join(process.env.SystemRoot, "System32")}`,
+    ProgramFiles: agent, "ProgramFiles(x86)": agent, PI_CODING_AGENT_DIR: agent,
+  });
+  delete base.BASH_ENV;
+  const env = createRuntimeEnvironment(runtime, base);
+  const script = `
+    import assert from 'node:assert/strict';
+    import { execFileSync } from 'node:child_process';
+    import { getShellConfig } from '@earendil-works/pi-coding-agent';
+    const { getToolPath } = await import(${JSON.stringify(new URL("../node_modules/@earendil-works/pi-coding-agent/dist/utils/tools-manager.js", import.meta.url).href)});
+    const shell = getShellConfig();
+    assert.equal(shell.shell.toLowerCase(), ${JSON.stringify(join(runtime, "git/bin/bash.exe").toLowerCase())});
+    assert.equal(getToolPath('rg'), 'rg');
+    assert.equal(getToolPath('fd'), 'fd');
+    const output=execFileSync(shell.shell,[...shell.args,'git --version && rg --version && fd --version'],{encoding:'utf8',windowsHide:true});
+    assert.match(output,/git version/); assert.match(output,/ripgrep/); assert.match(output,/fd /);
+  `;
+  execFileSync(process.execPath, ["--input-type=module", "-e", script], { env, stdio: "pipe", timeout: 30000 });
+});

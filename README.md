@@ -57,7 +57,7 @@ node_modules/.bin/tsc --noEmit
 npm run lint
 ```
 
-Do not run `next build` locally — it interferes with the dev server. Builds happen in CI.
+Do not run `next build` in the project root — it interferes with the dev server. Desktop packaging commands in `COMMANDS.md` use an isolated build directory.
 
 ## License
 

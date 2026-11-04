@@ -1,22 +1,36 @@
 import { app, BrowserWindow, dialog, shell } from "electron";
 import { SERVER_URL, isAppUrl, isExternalUrl, isPermissionAllowed } from "./navigation.mjs";
+import { startProductionServer } from "./production.mjs";
 
 app.setName("Weclio");
 let mainWindow = null;
+let service = null;
 
 function showError(message) {
+  service?.stop();
   console.error(`[desktop] ${message}`);
   dialog.showErrorBox("Weclio 桌面启动失败", message);
   app.exit(1);
 }
 
 app.on("window-all-closed", () => app.quit());
-app.on("before-quit", () => console.log("[desktop] 正在退出。"));
+app.on("before-quit", () => {
+  console.log("[desktop] 正在退出。");
+  service?.stop();
+});
 app.on("child-process-gone", (_event, details) => {
   console.error(`[desktop] ${details.type} 进程退出: ${details.reason} (${details.exitCode})`);
 });
 
 app.whenReady().then(async () => {
+  if (app.isPackaged) {
+    service = await startProductionServer({
+      resourcesPath: process.resourcesPath,
+      logsPath: app.getPath("logs"),
+      url: SERVER_URL,
+      onUnexpectedExit: (error) => showError(error.message),
+    });
+  }
   const window = new BrowserWindow({
     title: "Weclio",
     width: 1440,

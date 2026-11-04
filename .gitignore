@@ -19,6 +19,10 @@
 
 # production
 /build
+/bak/
+
+# bundled runtime binaries
+/resources/runtime/
 
 # misc
 .DS_Store

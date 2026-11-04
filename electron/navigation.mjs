@@ -1,4 +1,4 @@
-export const SERVER_URL = process.env.WECLIO_DESKTOP_URL ?? "http://127.0.0.1:8888";
+export const SERVER_URL = process.env.WECLIO_DESKTOP_URL ?? `http://127.0.0.1:${process.env.PORT ?? 8888}`;
 
 // 桌面只加载由本地启动器提供的 loopback 服务。
 const server = new URL(SERVER_URL);

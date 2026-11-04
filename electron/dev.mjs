@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import electron from "electron";
 import { assertPortAvailable, waitForServer } from "./server.mjs";
+import { createRuntimeEnvironment } from "./runtime.mjs";
 
 const require = createRequire(import.meta.url);
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -106,7 +107,10 @@ try {
   await assertPortAvailable(port);
   if (!stopping) {
     const server = launch(process.execPath, [require.resolve("next/dist/bin/next"), "dev", "-H", "127.0.0.1", "-p", String(port)], {
-      env: { ...process.env, PI_WEB_HOSTNAME: "127.0.0.1" },
+      env: {
+        ...createRuntimeEnvironment(fileURLToPath(new URL("../resources/runtime/win-x64/", import.meta.url))),
+        PI_WEB_HOSTNAME: "127.0.0.1",
+      },
     });
     // 只探测本次启动的 Next 宣告就绪后的 HTTP 响应，不将已有服务误认为启动成功。
     await waitForServer(url, {
