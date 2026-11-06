@@ -4,6 +4,8 @@ import { randomUUID } from "crypto";
 import { existsSync, realpathSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { validateAgentImages } from "./image-attachments";
+import type { ComposerPart } from "./composer";
+import { expandSkillParts } from "./skill-input";
 import { invalidateModelsCache } from "./models-cache";
 import { generateSessionTitle } from "./session-title";
 import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
@@ -406,9 +408,13 @@ export class AgentSessionWrapper {
     if (type !== "get_state") this.resetIdleTimer();
     if (this.shouldWaitForExtensions(type)) await this.waitForExtensionsBound();
 
+    let message = command.message as string;
     if (type === "prompt" || type === "steer" || type === "follow_up") {
       const imageError = validateAgentImages(command.images);
       if (imageError) throw new Error(imageError);
+      if (command.parts) {
+        message = expandSkillParts(command.parts as ComposerPart[], this.inner.resourceLoader.getSkills().skills);
+      }
     }
 
     switch (type) {
@@ -427,7 +433,7 @@ export class AgentSessionWrapper {
         this.persistPendingSession();
         invalidateSessionListCache();
         notifyRunningChange();
-        this.inner.prompt(command.message as string, {
+        this.inner.prompt(message, {
           ...(promptImages?.length ? { images: promptImages } : {}),
           ...(streamingBehavior ? { streamingBehavior } : {}),
           source: "rpc",
@@ -620,13 +626,13 @@ export class AgentSessionWrapper {
 
       case "steer": {
         const steerImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
-        await this.inner.steer(command.message as string, steerImages?.length ? steerImages : undefined);
+        await this.inner.steer(message, steerImages?.length ? steerImages : undefined);
         return null;
       }
 
       case "follow_up": {
         const followImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
-        await this.inner.followUp(command.message as string, followImages?.length ? followImages : undefined);
+        await this.inner.followUp(message, followImages?.length ? followImages : undefined);
         return null;
       }
 

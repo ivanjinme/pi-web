@@ -34,7 +34,7 @@ interface UseGlobalKeyboardShortcutsOptions {
  *   Esc          – stop the running agent (via module-level abort handler)
  *   Ctrl+Alt+N   – create a new session in the active project directory
  *
- * Note: Esc inside <textarea> or <input> is deliberately NOT handled here.
+ * Note: Esc inside editable elements is deliberately NOT handled here.
  * ChatInput manages its own Esc logic (closing slash / @ file menus, stopping
  * the agent when no menu is open) because it needs intimate knowledge of menu
  * state that is local to that component.
@@ -50,9 +50,9 @@ export function useGlobalKeyboardShortcuts(
       if (e.key === "Escape") {
         if (!globalAbortHandler) return;
 
-        const tag = (e.target as HTMLElement)?.tagName;
-        // Let textarea/input handle Esc internally (ChatInput menus / stop).
-        if (tag === "TEXTAREA" || tag === "INPUT") return;
+        const target = e.target as HTMLElement;
+        // 编辑器自行处理菜单、输入法和停止操作。
+        if (target?.tagName === "TEXTAREA" || target?.tagName === "INPUT" || target?.isContentEditable) return;
 
         e.preventDefault();
         globalAbortHandler();

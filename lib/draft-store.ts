@@ -1,10 +1,12 @@
+import { composerText, type ComposerPart } from "./composer";
+
 export interface ChatDraftImage {
   data: string;
   mimeType: string;
 }
 
 export interface ChatDraft {
-  value: string;
+  parts: ComposerPart[];
   images: ChatDraftImage[];
 }
 
@@ -12,13 +14,13 @@ const drafts = new Map<string, ChatDraft>();
 
 function cloneDraft(draft: ChatDraft): ChatDraft {
   return {
-    value: draft.value,
+    parts: draft.parts.map((part) => ({ ...part })),
     images: draft.images.map((image) => ({ ...image })),
   };
 }
 
 function isEmptyDraft(draft: ChatDraft): boolean {
-  return !draft.value && draft.images.length === 0;
+  return !composerText(draft.parts) && draft.images.length === 0;
 }
 
 export function getDraft(key: string): ChatDraft | null {

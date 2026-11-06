@@ -1,3 +1,4 @@
+import type { ComposerPart } from "../../composer";
 import type { ToolEntry, ToolPreset } from "../../tool-presets";
 import type { ExtensionStatusItem, ExtensionUiResponse, ExtensionWidgetItem } from "../../types";
 
@@ -8,9 +9,9 @@ export interface AgentImage {
 }
 
 export type AgentCommand =
-  | { type: "prompt"; message: string; images?: AgentImage[]; streamingBehavior?: "steer" | "followUp" }
-  | { type: "steer"; message: string; images?: AgentImage[] }
-  | { type: "follow_up"; message: string; images?: AgentImage[] }
+  | { type: "prompt"; message: string; images?: AgentImage[]; parts?: ComposerPart[]; streamingBehavior?: "steer" | "followUp" }
+  | { type: "steer"; message: string; images?: AgentImage[]; parts?: ComposerPart[] }
+  | { type: "follow_up"; message: string; images?: AgentImage[]; parts?: ComposerPart[] }
   | { type: "abort" }
   | { type: "get_state" }
   | { type: "get_tools" }

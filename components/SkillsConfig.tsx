@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
+import { getSkillSource } from "@/lib/skill-source";
 import type {
   SkillInfo as Skill,
   SkillInstallScope,
@@ -16,7 +17,7 @@ function shortenPath(p: string): string {
   return p.replace(/^\/(?:Users|home)\/[^/]+/, "~");
 }
 
-function sourceLabel(skill: Skill): string {
+function scopeLabel(skill: Skill): string {
   const src = skill.sourceInfo?.source;
   const scope = skill.sourceInfo?.scope;
   if (scope === "user" || src === "user") return "global";
@@ -110,7 +111,8 @@ function SkillDetail({
   onUpdate: () => void;
 }) {
   const { t } = useI18n();
-  const label = sourceLabel(skill);
+  const label = scopeLabel(skill);
+  const source = getSkillSource(skill);
   const enabled = !skill.disableModelInvocation;
 
   function displayPath(p: string): string {
@@ -166,42 +168,35 @@ function SkillDetail({
         )}
       </div>
 
-      {skill.install?.skillsShUrl && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span
-            style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}
-          >
-            {t("i18n.source")}
-          </span>
-          <a
-            href={skill.install.skillsShUrl}
-            target="_blank"
-            rel="noreferrer"
-            title={skill.install.skillsShUrl}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              width: "fit-content",
-              maxWidth: "100%",
-              color: "var(--accent)",
-              textDecoration: "none",
-            }}
-          >
-            <span
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 12,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        <span
+          style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}
+        >
+          {t("i18n.source")}
+        </span>
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 12,
+            color: "var(--text-muted)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {source.href ? (
+            <a
+              href={source.href}
+              target="_blank"
+              rel="noreferrer"
+              title={source.href}
+              style={{ color: "var(--accent)", textDecoration: "none" }}
             >
-              {skill.install.skillsShUrl.replace(/^https?:\/\//, "")} ↗
-            </span>
-          </a>
-        </div>
-      )}
+              {source.label} ↗
+            </a>
+          ) : source.label}
+        </span>
+      </div>
 
       {skill.install && (
         <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
@@ -909,32 +904,16 @@ export function SkillsConfig({ cwd }: SkillsConfigProps) {
                   const groups: { label: string; skills: typeof skills }[] = [];
                   const groupDefinitions = [
                     {
-                      label: `${t("i18n.project")} / skills.sh`,
-                      matches: (skill: Skill) =>
-                        sourceLabel(skill) === "project" &&
-                        Boolean(skill.install?.skillsShUrl),
-                    },
-                    {
                       label: t("i18n.project"),
-                      matches: (skill: Skill) =>
-                        sourceLabel(skill) === "project" &&
-                        !skill.install?.skillsShUrl,
-                    },
-                    {
-                      label: `${t("i18n.global")} / skills.sh`,
-                      matches: (skill: Skill) =>
-                        sourceLabel(skill) === "global" &&
-                        Boolean(skill.install?.skillsShUrl),
+                      matches: (skill: Skill) => scopeLabel(skill) === "project",
                     },
                     {
                       label: t("i18n.global"),
-                      matches: (skill: Skill) =>
-                        sourceLabel(skill) === "global" &&
-                        !skill.install?.skillsShUrl,
+                      matches: (skill: Skill) => scopeLabel(skill) === "global",
                     },
                     {
                       label: t("i18n.path"),
-                      matches: (skill: Skill) => sourceLabel(skill) === "path",
+                      matches: (skill: Skill) => scopeLabel(skill) === "path",
                     },
                   ];
                   for (const { label, matches } of groupDefinitions) {

@@ -46,6 +46,18 @@ for (const blockContent of [false, true]) {
   });
 }
 
+for (const blockContent of [false, true]) {
+  test(`hides skill bodies inserted in the middle of historical messages (${blockContent ? "blocks" : "string"})`, () => {
+    const text = '前文 <skill name="design" location="/private/design/SKILL.md">\nPrivate design instructions\n</skill> 中间 <skill name="review" location="/private/review/SKILL.md">\nPrivate review instructions\n</skill> 后文';
+    const message = { role: "user", content: blockContent ? [{ type: "text", text }] : text };
+    const original = structuredClone(message);
+    const html = renderMessage(message);
+    assert.match(html, /前文 \/skill:design 中间 \/skill:review 后文/);
+    assert.doesNotMatch(html, /Private (design|review) instructions|\/private\/|&lt;skill/);
+    assert.deepEqual(message, original);
+  });
+}
+
 const largeText = `<strong>${"x".repeat(100_000)}</strong>`;
 
 for (const [name, message] of [

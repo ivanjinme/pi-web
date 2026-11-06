@@ -5,6 +5,8 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo, ThinkingLevelOption } from "@/hooks/useAgentSession";
 import { clearDraft, getDraft, setDraft, type ChatDraftImage } from "@/lib/draft-store";
 import { NewTaskProjectPicker } from "./NewTaskProjectPicker";
+import { ComposerEditor, type ComposerEditorHandle } from "./composer/ComposerEditor";
+import { composerText, completionText, extractSlashToken, restoreComposerText, serializeComposer, textParts, type ComposerPart } from "@/lib/composer";
 import {
   MAX_ATTACHED_IMAGE_BYTES,
   MAX_ATTACHED_IMAGES,
@@ -31,11 +33,11 @@ interface ModelOption {
 }
 
 interface Props {
-  onSend: (message: string, images?: AttachedImage[]) => boolean | void | Promise<boolean | void>;
+  onSend: (message: string, images?: AttachedImage[], parts?: ComposerPart[]) => boolean | void | Promise<boolean | void>;
   onAbort: () => void;
-  onSteer?: (message: string, images?: AttachedImage[]) => void | Promise<void>;
-  onFollowUp?: (message: string, images?: AttachedImage[]) => void | Promise<void>;
-  onPromptWithStreamingBehavior?: (message: string, behavior: "steer" | "followUp", images?: AttachedImage[]) => void | Promise<void>;
+  onSteer?: (message: string, images?: AttachedImage[], parts?: ComposerPart[]) => void | Promise<void>;
+  onFollowUp?: (message: string, images?: AttachedImage[], parts?: ComposerPart[]) => void | Promise<void>;
+  onPromptWithStreamingBehavior?: (message: string, behavior: "steer" | "followUp", images?: AttachedImage[], parts?: ComposerPart[]) => void | Promise<void>;
   isStreaming: boolean;
   model?: { provider: string; modelId: string } | null;
   isAutoModelSelection?: boolean;
@@ -244,7 +246,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 }: Props, ref) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
-  const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey)?.value ?? "" : ""));
+  const [parts, setParts] = useState<ComposerPart[]>(() => {
+    const draft = draftKey ? getDraft(draftKey) : null;
+    return draft?.parts ?? [];
+  });
+  const value = composerText(parts);
+  const [cursor, setCursor] = useState(value.length);
+  const skillParts = parts.some((part) => part.type === "skill") ? parts : undefined;
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
@@ -254,7 +262,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     draftKey ? draftImagesToAttachedImages(getDraft(draftKey)?.images) : []
   ));
   const trimmedValue = value.trimStart();
-  const bashMode = attachedImages.length === 0 && trimmedValue.startsWith("!");
+  const bashMode = !skillParts && attachedImages.length === 0 && trimmedValue.startsWith("!");
   const bashExcluded = bashMode && trimmedValue.startsWith("!!");
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
@@ -270,7 +278,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [fileIndexLoading, setFileIndexLoading] = useState(false);
   const [atServerResult, setAtServerResult] = useState<{ cwd: string; query: string; matches: FileIndexEntry[] } | null>(null);
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<ComposerEditorHandle>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const modelDropdownPanelRef = useRef<HTMLDivElement>(null);
   const toolDropdownRef = useRef<HTMLDivElement>(null);
@@ -286,67 +294,34 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const fileIndexMetaRef = useRef<{ cwd: string; fetchedAt: number } | null>(null);
   const fileIndexFetchingRef = useRef<string | null>(null);
   const draftKeyRef = useRef(draftKey);
-  const valueRef = useRef(value);
+  const partsRef = useRef(parts);
   const attachedImagesRef = useRef(attachedImages);
   const pendingImageCountRef = useRef(0);
   const queueSubmitRef = useRef(false);
   const queueSubmitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  valueRef.current = value;
+  partsRef.current = parts;
   attachedImagesRef.current = attachedImages;
 
   useImperativeHandle(ref, () => ({
     insertIfEmpty(text: string) {
-      const ta = textareaRef.current;
-      const current = ta ? ta.value : value;
-      if (current.trim()) return;
-      setValue(text);
+      if (value.trim()) return;
+      setParts(textParts(text));
       setAtQuery(null);
-      requestAnimationFrame(() => {
-        if (!ta) return;
-        ta.focus();
-        ta.style.height = "auto";
-        ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
-      });
+      requestAnimationFrame(() => editorRef.current?.focus());
     },
     prependText(text: string) {
       if (!text.trim()) return;
-      const ta = textareaRef.current;
-      const current = ta ? ta.value : value;
-      // Mirrors the TUI's queue restore: queued text first, then whatever
-      // the user already typed, separated by a blank line.
-      const combined = [text, current].filter((t) => t.trim()).join("\n\n");
-      setValue(combined);
+      const combined = [...restoreComposerText(text), ...textParts(value.trim() ? "\n\n" : ""), ...parts];
+      setParts(combined);
       setAtQuery(null);
-      requestAnimationFrame(() => {
-        if (!ta) return;
-        ta.focus();
-        ta.setSelectionRange(combined.length, combined.length);
-        ta.style.height = "auto";
-        ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
-      });
+      requestAnimationFrame(() => editorRef.current?.focus(composerText(combined).length));
     },
     insertText(text: string) {
-      const ta = textareaRef.current;
-      if (!ta) {
-        setValue((v) => v + (v ? " " : "") + text);
-        return;
-      }
-      const start = ta.selectionStart ?? ta.value.length;
-      const end = ta.selectionEnd ?? ta.value.length;
-      const before = ta.value.slice(0, start);
-      const after = ta.value.slice(end);
+      const range = editorRef.current?.selection() ?? { start: value.length, end: value.length };
+      const before = value.slice(0, range.start);
       const sep = before.length > 0 && !before.endsWith(" ") ? " " : "";
-      const newVal = before + sep + text + after;
-      setValue(newVal);
+      editorRef.current?.replace(range.start, range.end, textParts(sep + text));
       setAtQuery(null);
-      requestAnimationFrame(() => {
-        if (!ta) return;
-        const pos = start + sep.length + text.length;
-        ta.setSelectionRange(pos, pos);
-        ta.focus();
-        ta.style.height = "auto";
-        ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
-      });
     },
     addImages(files: File[]) {
       processImageFiles(files);
@@ -408,12 +383,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   }, []);
 
   const resetInput = useCallback(() => {
-    setValue("");
+    setParts([]);
     setAtQuery(null);
     setHistoryMenuOpen(false);
     if (draftKey) clearDraft(draftKey);
     if (draftKeyRef.current && draftKeyRef.current !== draftKey) clearDraft(draftKeyRef.current);
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
   }, [draftKey]);
 
   const clearInput = useCallback(() => {
@@ -426,25 +400,22 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     setAttachedImages([]);
   }, [resetInput]);
 
-  const restoreInput = useCallback((text: string, images: AttachedImage[]) => {
-    setValue((current) => {
-      if (!current.trim()) return text;
-      if (!text || current.trim() === text) return current;
-      return `${text}\n\n${current}`;
+  const restoreInput = useCallback((submitted: ComposerPart[], images: AttachedImage[]) => {
+    setParts((current) => {
+      if (!composerText(current).trim()) return submitted;
+      if (!submitted.length || serializeComposer(current) === serializeComposer(submitted)) return current;
+      return [...submitted, ...textParts("\n\n"), ...current];
     });
     setAttachedImages((current) => {
       const combined = [...images, ...current];
       combined.slice(MAX_ATTACHED_IMAGES).forEach(revokeImagePreview);
       return combined.slice(0, MAX_ATTACHED_IMAGES);
     });
-    requestAnimationFrame(() => textareaRef.current?.focus());
+    requestAnimationFrame(() => editorRef.current?.focus());
   }, []);
 
   const focusComposer = useCallback(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    textarea.focus();
-    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    editorRef.current?.focus(composerText(partsRef.current).length);
   }, []);
 
   useEffect(() => {
@@ -456,10 +427,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   useEffect(() => {
     if (!draftKey || draftKeyRef.current !== draftKey) return;
     setDraft(draftKey, {
-      value,
+      parts,
       images: attachedImages.map(imageToDraftImage),
     });
-  }, [attachedImages, draftKey, value]);
+  }, [attachedImages, draftKey, parts]);
 
   useEffect(() => {
     const previousDraftKey = draftKeyRef.current;
@@ -467,14 +438,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
     if (previousDraftKey) {
       setDraft(previousDraftKey, {
-        value: valueRef.current,
+        parts: partsRef.current,
         images: attachedImagesRef.current.map(imageToDraftImage),
       });
     }
 
     const draft = draftKey ? getDraft(draftKey) : null;
     draftKeyRef.current = draftKey;
-    setValue(draft?.value ?? "");
+    setParts(draft?.parts ?? []);
     setAtQuery(null);
     setHistoryMenuOpen(false);
     setAttachedImages((prev) => {
@@ -484,13 +455,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   }, [draftKey]);
 
   useEffect(() => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    ta.style.height = "auto";
-    if (value) ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
-  }, [value]);
-
-  useEffect(() => {
     return () => {
       attachedImagesRef.current.forEach(revokeImagePreview);
       if (queueSubmitTimeoutRef.current) clearTimeout(queueSubmitTimeoutRef.current);
@@ -498,7 +462,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   }, []);
 
   const handleSend = useCallback(async () => {
-    const msg = value.trim();
+    const msg = serializeComposer(parts).trim();
     if (!msg && !attachedImages.length) return;
     if (isStreaming || sendSubmitting) return;
     const submittedImages = attachedImages;
@@ -507,27 +471,26 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     setSendSubmitting(true);
     detachInput();
     try {
-      if (!submittedImages.length && msg.startsWith("/") && onBuiltinCommand) {
+      if (!skillParts && !submittedImages.length && msg.startsWith("/") && onBuiltinCommand) {
         const result = await onBuiltinCommand(msg);
         if (result.handled) {
           shouldRestore = false;
           return;
         }
       }
-      const accepted = await onSend(msg, submittedImages.length ? submittedImages : undefined);
+      const accepted = await onSend(msg, submittedImages.length ? submittedImages : undefined, skillParts);
       shouldRestore = accepted === false;
     } catch {
       // 错误由提交层展示；这里只负责恢复草稿。
     } finally {
-      if (shouldRestore) restoreInput(msg, submittedImages);
+      if (shouldRestore) restoreInput(parts, submittedImages);
       else submittedImages.forEach(revokeImagePreview);
       setSendSubmitting(false);
     }
-  }, [value, attachedImages, isStreaming, sendSubmitting, onBuiltinCommand, onSend, detachInput, restoreInput, onAudioUnlock]);
+  }, [parts, skillParts, attachedImages, isStreaming, sendSubmitting, onBuiltinCommand, onSend, detachInput, restoreInput, onAudioUnlock]);
 
-  const slashQuery = value.startsWith("/") && !/\s/.test(value.slice(1))
-    ? value.slice(1).toLowerCase()
-    : null;
+  const slashToken = cursor < 0 ? null : extractSlashToken(completionText(parts), cursor);
+  const slashQuery = slashToken?.query ?? null;
 
   const filteredSlashCommands = (() => {
     if (slashQuery === null) return [];
@@ -592,13 +555,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   // ── @ file autocomplete ──────────────────────────────────────────────────
   // Recomputed from the text before the caret on every change/caret move.
   // Disabled entirely when there is no cwd (new session without a directory).
-  const updateAtQuery = useCallback((text: string, cursor: number | null) => {
-    if (!cwd) {
+  const updateAtQuery = useCallback((text: string, cursor: number) => {
+    setCursor(cursor);
+    if (!cwd || cursor < 0) {
       setAtQuery(null);
       return;
     }
-    const pos = cursor ?? text.length;
-    setAtQuery(extractAtQuery(text.slice(0, pos)));
+    setAtQuery(extractAtQuery(text.slice(0, cursor)));
   }, [cwd]);
 
   const atQueryText = atQuery?.query ?? null;
@@ -683,8 +646,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
   const applyAtCompletion = useCallback((entry: FileIndexEntry) => {
     if (!atQuery) return;
-    const ta = textareaRef.current;
-    const cursor = ta?.selectionStart ?? value.length;
+    const cursor = editorRef.current?.selection().start ?? value.length;
     const before = value.slice(0, atQuery.start);
     let after = value.slice(cursor);
     // Completing inside a quoted token (@"my dir/… with the caret before the
@@ -694,21 +656,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       after = after.slice(1);
     }
     const insert = buildAtInsertText(entry.path, entry.isDir, atQuery.quoted);
-    const newValue = before + insert.text + after;
-    const newPos = before.length + insert.cursorOffset;
-    setValue(newValue);
-    // setValue alone does not fire onChange — re-derive the token here. Files
-    // end with a space (token closes, menu hides); directories end with "/"
-    // before the caret (token stays open for drill-down into the directory).
-    setAtQuery(extractAtQuery(newValue.slice(0, newPos)));
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      el.focus();
-      el.setSelectionRange(newPos, newPos);
-      el.style.height = "auto";
-      el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-    });
+    const end = value.length - after.length;
+    editorRef.current?.replace(atQuery.start, end, textParts(insert.text));
+    requestAnimationFrame(() => editorRef.current?.focus(before.length + insert.cursorOffset));
   }, [atQuery, value]);
 
   useEffect(() => {
@@ -742,46 +692,35 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   }, [historyActiveIndex, historyMenuOpen]);
 
   const applyHistoryInput = useCallback((text: string) => {
-    setValue(text);
+    const restored = restoreComposerText(text);
+    setParts(restored);
     setHistoryMenuOpen(false);
     setHistoryActiveIndex(0);
     setAtQuery(null);
-    requestAnimationFrame(() => {
-      const ta = textareaRef.current;
-      if (!ta) return;
-      ta.focus();
-      ta.setSelectionRange(text.length, text.length);
-      ta.style.height = "auto";
-      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
-    });
+    requestAnimationFrame(() => editorRef.current?.focus(composerText(restored).length));
   }, []);
 
   const applySlashCommand = useCallback((command: SlashCommandPaletteItem) => {
-    const nextValue = `/${command.name} `;
-    setValue(nextValue);
+    if (!slashToken) return;
+    const replacement: ComposerPart[] = command.source === "skill"
+      ? [{ type: "skill", name: command.name.replace(/^skills?:/i, "") }, ...textParts(" ")]
+      : textParts(`/${command.name} `);
+    editorRef.current?.replace(slashToken.start, slashToken.end, replacement);
     setSlashMenuOpen(false);
     setSlashActiveIndex(0);
-    requestAnimationFrame(() => {
-      const ta = textareaRef.current;
-      if (!ta) return;
-      ta.focus();
-      ta.setSelectionRange(nextValue.length, nextValue.length);
-      ta.style.height = "auto";
-      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
-    });
-  }, []);
+  }, [slashToken]);
 
   const sendQueued = useCallback(async (mode: "steer" | "followup") => {
-    const msg = value.trim();
+    const msg = serializeComposer(parts).trim();
     if (!msg && !attachedImages.length) return;
     if (attachedImages.length || hasQueuedMessage || queueSubmitRef.current) return;
     const streamingBehavior = mode === "steer" ? "steer" : "followUp";
-    const handler = msg.startsWith("/") && onPromptWithStreamingBehavior
+    const handler = !skillParts && msg.startsWith("/") && onPromptWithStreamingBehavior
       ? () => onPromptWithStreamingBehavior(msg, streamingBehavior)
       : mode === "steer" && onSteer
-        ? () => onSteer(msg)
+        ? () => onSteer(msg, undefined, skillParts)
         : onFollowUp
-          ? () => onFollowUp(msg)
+          ? () => onFollowUp(msg, undefined, skillParts)
           : null;
     if (!handler) return;
 
@@ -794,12 +733,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     } catch {
       queueSubmitRef.current = false;
       setQueueSubmitting(false);
-      setValue((current) => {
-        if (!current.trim()) return msg;
-        if (current.trim() === msg) return current;
-        return `${msg}\n\n${current}`;
-      });
-      requestAnimationFrame(() => textareaRef.current?.focus());
+      restoreInput(parts, []);
       return;
     }
 
@@ -811,7 +745,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       setQueueSubmitting(false);
       queueSubmitTimeoutRef.current = null;
     }, 5000);
-  }, [value, attachedImages, hasQueuedMessage, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock]);
+  }, [parts, skillParts, attachedImages, hasQueuedMessage, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, restoreInput, onAudioUnlock]);
 
   const getNextSlashIndex = useCallback((direction: "up" | "down" | "left" | "right") => {
     const lastIndex = filteredSlashCommands.length - 1;
@@ -857,7 +791,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   }, [filteredSlashCommands.length, slashActiveIndex]);
 
   const handleKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    (e: KeyboardEvent<HTMLDivElement>) => {
       const nativeEvent = e.nativeEvent;
       const recentlyComposed = Date.now() - lastCompositionEndAtRef.current < COMPOSITION_END_ENTER_GRACE_MS;
       const isComposing =
@@ -893,7 +827,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }
       }
 
-      if (slashMenuOpen && slashQuery !== null) {
+      if (slashMenuOpen && slashQuery !== null && !isComposing) {
         if (e.key === "ArrowDown") {
           e.preventDefault();
           setSlashActiveIndex(getNextSlashIndex("down"));
@@ -983,13 +917,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     },
     [isStreaming, isCompacting, onSteer, onFollowUp, onAbort, hasQueuedMessage, slashMenuOpen, slashQuery, filteredSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
   );
-
-  const handleInput = useCallback(() => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
-  }, []);
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = Array.from(e.clipboardData?.items ?? []);
@@ -1085,7 +1012,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       if (controlsMenuRef.current && !controlsMenuRef.current.contains(e.target as Node)) {
         setControlsMenuOpen(false);
       }
-      if (historyMenuRef.current && !historyMenuRef.current.contains(e.target as Node) && !textareaRef.current?.contains(e.target as Node)) {
+      if (historyMenuRef.current && !historyMenuRef.current.contains(e.target as Node) && !editorRef.current?.contains(e.target as Node)) {
         setHistoryMenuOpen(false);
       }
     };
@@ -1540,29 +1467,24 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               transition: "border-color 0.15s, background 0.15s, box-shadow 0.15s",
             } as React.CSSProperties}
           >
-          <textarea
-            ref={textareaRef}
-            value={value}
-            onChange={(e) => {
-              setValue(e.target.value);
+          <ComposerEditor
+            key={draftKey}
+            ref={editorRef}
+            parts={parts}
+            onChange={(next) => {
+              setParts(next);
               setHistoryMenuOpen(false);
-              updateAtQuery(e.target.value, e.target.selectionStart);
             }}
-            onSelect={(e) => {
-              const el = e.currentTarget;
-              updateAtQuery(el.value, el.selectionStart);
-            }}
+            onSelectionChange={updateAtQuery}
             onKeyDown={handleKeyDown}
             onCompositionStart={() => {
               isComposingRef.current = true;
             }}
-            onCompositionEnd={(e) => {
+            onCompositionEnd={() => {
               isComposingRef.current = false;
               lastCompositionEndAtRef.current = Date.now();
-              const el = e.currentTarget;
-              updateAtQuery(el.value, el.selectionStart);
+              updateAtQuery(completionText(partsRef.current), editorRef.current?.selection().start ?? 0);
             }}
-            onInput={handleInput}
             onPaste={handlePaste}
             placeholder={
               isCompacting
@@ -1572,21 +1494,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   : isStreaming ? t("chat.agentPlaceholder")
                   : t("chat.messagePlaceholder")
             }
-            rows={1}
-            style={{
-              flex: 1,
-              background: "none",
-              border: "none",
-              outline: "none",
-              resize: "none",
-              color: "var(--text)",
-              fontSize: 14,
-              lineHeight: 1.6,
-              fontFamily: "inherit",
-              minHeight: 24,
-              maxHeight: 200,
-              overflow: "auto",
-            }}
           />
 
           <button

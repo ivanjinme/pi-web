@@ -92,3 +92,44 @@ test("autocomplete-created drafts preserve thinking through first send and subse
   assert.equal(runtimeThinking, "medium");
   assert.deepEqual(commands.slice(-2).map((command) => command.type), ["set_model", "set_thinking_level"]);
 });
+
+test("all send paths carry skill parts without treating tagged input as a shell command", async (t) => {
+  const hooks = createHookState();
+  const commands = [];
+  const jiti = createJiti(import.meta.url, {
+    moduleCache: false,
+    alias: { "@": fileURLToPath(new URL("../", import.meta.url)) },
+    virtualModules: {
+      react: hooks.react,
+      "@/lib/agent-client": {
+        async sendAgentCommand(_sid, command) { commands.push(command); return null; },
+      },
+    },
+  });
+  const { useAgentSession } = await jiti.import("./useAgentSession.ts");
+  const previousEventSource = globalThis.EventSource;
+  globalThis.EventSource = class {
+    static OPEN = 1;
+    readyState = 1;
+    constructor() {
+      queueMicrotask(() => this.onmessage({ data: JSON.stringify({ type: "connected" }) }));
+    }
+    close() {}
+  };
+  t.after(() => {
+    if (previousEventSource === undefined) delete globalThis.EventSource;
+    else globalThis.EventSource = previousEventSource;
+  });
+  const hook = useAgentSession({ session: { id: "skill-session", cwd: process.cwd() } });
+  const parts = [{ type: "text", text: "! note " }, { type: "skill", name: "design" }];
+  const message = "! note /skill:design";
+  await hook.handleSteer(message, undefined, parts);
+  await hook.handleFollowUp(message, undefined, parts);
+  await hook.handlePromptWithStreamingBehavior(message, "followUp", undefined, parts);
+  assert.equal(await hook.handleSend(message, undefined, parts), true);
+  assert.deepEqual(commands.map((command) => command.type), ["steer", "follow_up", "prompt", "prompt"]);
+  for (const command of commands) {
+    assert.deepEqual(command.parts, parts);
+    assert.equal(command.message, message);
+  }
+});

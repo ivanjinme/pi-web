@@ -15,6 +15,7 @@ import { normalizeToolCalls } from "@/lib/normalize";
 import { sendAgentCommand } from "@/lib/agent-client";
 import { resolveThinkingLevel } from "@/lib/thinking-level";
 import type { CompactCommandResult, QueuedMessages, SlashCommandInfo } from "@/lib/agent/protocol/commands";
+import type { ComposerPart } from "@/lib/composer";
 export type { QueuedMessages, SlashCommandInfo } from "@/lib/agent/protocol/commands";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import {
@@ -897,7 +898,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [addNotice, finishPromptWithoutStream, handleExtensionUiRequest, loadSession, onAgentEnd, onSessionRenamed, updateCompacting]);
   handleAgentEventRef.current = handleAgentEvent;
 
-  const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
+  const handleSend = useCallback(async (message: string, images?: AttachedImage[], parts?: ComposerPart[]) => {
     const trimmedMessage = message.trim();
     if (!trimmedMessage && !images?.length) return false;
     if (agentRunningRef.current || bashRunningRef.current || compactingRef.current) return false;
@@ -914,9 +915,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         return false;
       }
     }
-    const isSlashCommandPrompt = !images?.length && trimmedMessage.startsWith("/");
+    const isSlashCommandPrompt = !parts && !images?.length && trimmedMessage.startsWith("/");
 
-    const isBashCommand = !images?.length && trimmedMessage.startsWith("!");
+    const isBashCommand = !parts && !images?.length && trimmedMessage.startsWith("!");
     if (isBashCommand) {
       const isExcluded = trimmedMessage.startsWith("!!");
       const bashCmd = (isExcluded ? trimmedMessage.slice(2) : trimmedMessage.slice(1)).trim();
@@ -967,6 +968,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           await sendAgentCommand(sid, {
             type: "prompt",
             message,
+            ...(parts ? { parts } : {}),
             ...(piImages?.length ? { images: piImages } : {}),
           });
           promoteNewSession(1, message);
@@ -977,6 +979,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         await sendAgentCommand(session.id, {
           type: "prompt",
           message,
+          ...(parts ? { parts } : {}),
           ...(piImages?.length ? { images: piImages } : {}),
         });
       }
@@ -1274,13 +1277,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       ?? reportQueueFailure(label, new Error("No active session"));
   }, [reportQueueFailure]);
 
-  const handleSteer = useCallback(async (message: string, images?: AttachedImage[]) => {
+  const handleSteer = useCallback(async (message: string, images?: AttachedImage[], parts?: ComposerPart[]) => {
     const sid = getQueueSessionId("Steer");
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
     try {
       await sendAgentCommand(sid, {
         type: "steer",
         message,
+        ...(parts ? { parts } : {}),
         ...(piImages?.length ? { images: piImages } : {}),
       });
     } catch (e) {
@@ -1292,6 +1296,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     message: string,
     behavior: "steer" | "followUp",
     images?: AttachedImage[],
+    parts?: ComposerPart[],
   ) => {
     const label = behavior === "steer" ? "Steer" : "Follow up";
     const sid = getQueueSessionId(label);
@@ -1301,6 +1306,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         type: "prompt",
         message,
         streamingBehavior: behavior,
+        ...(parts ? { parts } : {}),
         ...(piImages?.length ? { images: piImages } : {}),
       });
     } catch (e) {
@@ -1308,13 +1314,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [getQueueSessionId, reportQueueFailure]);
 
-  const handleFollowUp = useCallback(async (message: string, images?: AttachedImage[]) => {
+  const handleFollowUp = useCallback(async (message: string, images?: AttachedImage[], parts?: ComposerPart[]) => {
     const sid = getQueueSessionId("Follow up");
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
     try {
       await sendAgentCommand(sid, {
         type: "follow_up",
         message,
+        ...(parts ? { parts } : {}),
         ...(piImages?.length ? { images: piImages } : {}),
       });
     } catch (e) {

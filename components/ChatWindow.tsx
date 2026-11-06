@@ -471,32 +471,7 @@ export function ChatWindow({ session, newSessionCwd, newTaskDraftId, showProject
         />
       )}
 
-      {isEmptyNew ? (
-        <div className="chat-content-gutter flex flex-1 flex-col items-center justify-center overflow-y-auto py-8">
-          <div className="chat-content-column">
-            <div
-              className="mb-3"
-              style={{
-                color: "var(--text)",
-                fontFamily: "var(--font-mono)",
-                fontSize: 22,
-                fontWeight: 700,
-                lineHeight: 1.4,
-                textAlign: "center",
-              }}
-            >
-              What’s on your mind today?
-            </div>
-            <div style={{ position: "relative" }}>
-              {chatInputElement}
-              <div style={{ position: "absolute", bottom: "calc(100% - 30px)", left: 24, right: 24, zIndex: 10, pointerEvents: "none" }}>
-                <NoticeShelf notices={notices} compact />
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : (
-      <>
+      {!isEmptyNew && (
       <div className="chat-conversation-region relative flex flex-1 overflow-hidden">
         {isMinimapHidden ? null : (
           <ChatMinimap
@@ -784,17 +759,37 @@ export function ChatWindow({ session, newSessionCwd, newTaskDraftId, showProject
         </div>
       </div>
 
-      <div className="relative">
-        <div className="chat-content-gutter">
-          <div className="chat-content-column">
-            <ExtensionWidgets widgets={belowEditorWidgets} />
-          </div>
-        </div>
-        {chatInputElement}
-        <ExtensionStatusBar statuses={extensionStatuses} />
-      </div>
-      </>
       )}
+
+      {/* 首条消息只切换布局，不重挂载编辑器，以保留提交中状态和失败恢复。 */}
+      <div className={isEmptyNew ? "chat-content-gutter flex flex-1 flex-col items-center justify-center overflow-y-auto py-8" : "relative"}>
+        <div className={isEmptyNew ? "chat-content-column" : undefined}>
+          {isEmptyNew && (
+            <div
+              className="mb-3"
+              style={{ color: "var(--text)", fontFamily: "var(--font-mono)", fontSize: 22, fontWeight: 700, lineHeight: 1.4, textAlign: "center" }}
+            >
+              What’s on your mind today?
+            </div>
+          )}
+          {!isEmptyNew && (
+            <div className="chat-content-gutter">
+              <div className="chat-content-column">
+                <ExtensionWidgets widgets={belowEditorWidgets} />
+              </div>
+            </div>
+          )}
+          <div style={{ position: "relative" }}>
+            {chatInputElement}
+            {isEmptyNew && (
+              <div style={{ position: "absolute", bottom: "calc(100% - 30px)", left: 24, right: 24, zIndex: 10, pointerEvents: "none" }}>
+                <NoticeShelf notices={notices} compact />
+              </div>
+            )}
+          </div>
+          {!isEmptyNew && <ExtensionStatusBar statuses={extensionStatuses} />}
+        </div>
+      </div>
     </div>
   );
 }

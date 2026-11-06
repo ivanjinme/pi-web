@@ -3,10 +3,14 @@ import type { AssistantContentBlock, AssistantMessage, TextContent, ThinkingCont
 export type TextPhase = "commentary" | "final_answer";
 
 export function getUserMessageDisplayText(text: string): string {
-  // 仅还原 SDK 展开的技能命令，不修改会话原文或模型上下文。
-  const match = text.match(/^<skill name="([^"]+)" location="[^"]+">\n[\s\S]*?\n<\/skill>(?:\n\n([\s\S]+))?$/);
-  if (!match) return text;
-  return `/skill:${match[1]}${match[2] ? ` ${match[2]}` : ""}`;
+  // 仅压缩展示，保持持久化原文和模型上下文不变。
+  return text.replace(
+    /<skill name="([^"]+)" location="[^"]+">\n[\s\S]*?\n<\/skill>(\n\n)?/g,
+    (_block: string, name: string, separator: string | undefined, offset: number) => {
+      const suffix = offset === 0 && separator ? " " : separator ?? "";
+      return `/skill:${name}${suffix}`;
+    },
+  );
 }
 
 export function getTextPhase(block: TextContent): TextPhase | undefined {

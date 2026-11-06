@@ -1,0 +1,39 @@
+.composer-content {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.composer-editor {
+  min-height: 24px;
+  max-height: 200px;
+  overflow: auto;
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.composer-paragraph {
+  margin: 0;
+}
+
+.composer-placeholder {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.composer-skill {
+  padding: 1px 5px;
+  border-radius: 5px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
