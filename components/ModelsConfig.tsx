@@ -514,26 +514,6 @@ function ThinkingLevelMapEditor({
 
 // ── Model detail ──────────────────────────────────────────────────────────────
 
-const DEEPSEEK_COMPAT = {
-  thinkingFormat: "deepseek",
-  requiresReasoningContentOnAssistantMessages: true,
-} as const;
-
-function hasDeepseekCompat(model: ModelEntry): boolean {
-  return model.compat?.thinkingFormat === "deepseek";
-}
-
-function setDeepseekCompat(model: ModelEntry, enabled: boolean): ModelEntry {
-  if (enabled) {
-    return { ...model, compat: { ...(model.compat ?? {}), ...DEEPSEEK_COMPAT } };
-  }
-  if (!model.compat) return model;
-  const rest = { ...model.compat };
-  delete rest.thinkingFormat;
-  delete rest.requiresReasoningContentOnAssistantMessages;
-  return { ...model, compat: Object.keys(rest).length ? rest : undefined };
-}
-
 function ModelDetail({
   providerName,
   provider,
@@ -683,36 +663,29 @@ function ModelDetail({
       </Field>
 
       <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
-        <Check label="Reasoning / thinking" checked={model.reasoning ?? false} onChange={(v) => set("reasoning", v || undefined)} />
-        <Check label="Image input" checked={model.input?.includes("image") ?? false}
+        <Check label="Reasoning" checked={model.reasoning ?? false} onChange={(v) => set("reasoning", v || undefined)} />
+        <Check label="Image" checked={model.input?.includes("image") ?? false}
           onChange={(v) => set("input", v ? ["text", "image"] : undefined)} />
       </div>
 
       {model.reasoning && (
-        <>
-          <Check
-            label="DeepSeek thinking compat"
-            checked={hasDeepseekCompat(model)}
-            onChange={(v) => onChange(setDeepseekCompat(model, v))}
-          />
-          <div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <SectionTitle>Thinking level map</SectionTitle>
-              {model.thinkingLevelMap && (
-                <button
-                  onClick={() => set("thinkingLevelMap", undefined)}
-                  style={{ fontSize: 10, padding: "2px 7px", background: "none", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text-dim)", cursor: "pointer" }}
-                >
-                  clear all
-                </button>
-              )}
-            </div>
-            <ThinkingLevelMapEditor
-              value={model.thinkingLevelMap}
-              onChange={(v) => set("thinkingLevelMap", v)}
-            />
+        <div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <SectionTitle>Thinking level map</SectionTitle>
+            {model.thinkingLevelMap && (
+              <button
+                onClick={() => set("thinkingLevelMap", undefined)}
+                style={{ fontSize: 10, padding: "2px 7px", background: "none", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text-dim)", cursor: "pointer" }}
+              >
+                clear all
+              </button>
+            )}
           </div>
-        </>
+          <ThinkingLevelMapEditor
+            value={model.thinkingLevelMap}
+            onChange={(v) => set("thinkingLevelMap", v)}
+          />
+        </div>
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>

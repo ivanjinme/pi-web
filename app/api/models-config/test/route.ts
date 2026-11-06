@@ -77,7 +77,8 @@ export async function POST(req: Request) {
     const startedAt = Date.now();
 
     try {
-      const message = await completeSimple(model, {
+      // 连通性测试不让 SDK 生成推理控制参数；不修改保存的模型能力或聊天档位。
+      const message = await completeSimple({ ...model, reasoning: false }, {
         messages: [{
           role: "user",
           content: "Reply with OK only.",

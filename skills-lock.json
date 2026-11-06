@@ -5,13 +5,19 @@
       "source": "vercel-labs/agent-browser",
       "sourceType": "github",
       "skillPath": "skills/agent-browser/SKILL.md",
-      "computedHash": "79add54dd6de82a262a88c94744d7decde000159c1d7f67c78eb9d4e523d54bb"
+      "computedHash": "60a9cbe5af176150582c019e16e5d3703a41bb02d88438e881349876120d7944"
     },
     "frontend-design": {
       "source": "anthropics/skills",
       "sourceType": "github",
       "skillPath": "skills/frontend-design/SKILL.md",
       "computedHash": "106acf230014cbb43ca34e6410371321b56ca742f9ee0442e8ec05bf02eb0384"
+    },
+    "grilling": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/productivity/grilling/SKILL.md",
+      "computedHash": "a57d6b820c3b10700fd7de8ea1199bb0d42bc194df9f10baec4a6ed6a9686448"
     }
   }
 }
