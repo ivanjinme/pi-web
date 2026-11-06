@@ -1,5 +1,6 @@
 {
   "packages": [
-    "npm:@weclio/pi-web-search"
+    "npm:@weclio/pi-web-search",
+    "npm:@weclio/pi-submarine"
   ]
 }
