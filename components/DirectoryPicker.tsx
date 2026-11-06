@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/hooks/useI18n";
 
@@ -48,6 +48,7 @@ export function DirectoryPicker({ onCancel, onSelect, busy = false, error }: Pro
   const [directories, setDirectories] = useState<DirectoryEntry[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const backdropMouseDown = useRef(false);
 
   const navigateTo = useCallback(async (directory?: string) => {
     setLoading(true);
@@ -87,8 +88,14 @@ export function DirectoryPicker({ onCancel, onSelect, busy = false, error }: Pro
       role="dialog"
       aria-modal="true"
       aria-label={t("directoryPicker.selectDirectory")}
-      onClick={(event) => {
-        if (event.target === event.currentTarget && !busy) onCancel();
+      onMouseDown={(event) => {
+        backdropMouseDown.current = event.button === 0 && event.target === event.currentTarget;
+      }}
+      onMouseUp={(event) => {
+        // 拖选从弹窗内开始或在弹窗内结束时，不视为点击遮罩。
+        const shouldClose = backdropMouseDown.current && event.button === 0 && event.target === event.currentTarget;
+        backdropMouseDown.current = false;
+        if (shouldClose && !busy) onCancel();
       }}
       onKeyDown={(event) => {
         if (event.key === "Escape" && !busy) onCancel();
