@@ -10,6 +10,7 @@ import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { CLEAR_HISTORY_COMMAND, HISTORY_PUSH_TAG, SKIP_DOM_SELECTION_TAG } from "lexical";
 import { completionText, serializeComposer, type ComposerPart } from "@/lib/composer";
 import { SkillNode } from "./SkillNode";
+import { FileNode } from "./FileNode";
 import { $insertParts, $readDocument, $replaceDocument, $selectRange, selectedParts } from "./editor-document";
 
 const CLIPBOARD_TYPE = "application/x-weclio-composer";
@@ -133,7 +134,7 @@ const Editor = forwardRef<ComposerEditorHandle, Props>(function Editor(props, re
 export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function ComposerEditor(props, ref) {
   const config = useRef({
     namespace: "weclio-composer",
-    nodes: [SkillNode],
+    nodes: [SkillNode, FileNode],
     theme: { paragraph: "composer-paragraph" },
     onError(error: Error) { throw error; },
     editorState: () => $replaceDocument(props.parts),

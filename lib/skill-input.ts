@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import { stripFrontmatter, type Skill } from "@earendil-works/pi-coding-agent";
-import type { ComposerPart } from "./composer";
+import { serializeComposerPart, type ComposerPart } from "./composer";
 
 export function expandSkillParts(parts: ComposerPart[], skills: Pick<Skill, "name" | "filePath" | "baseDir">[]): string {
   return parts.map((part) => {
-    if (part.type === "text") return part.text;
+    if (part.type !== "skill") return serializeComposerPart(part);
     const skill = skills.find((skill) => skill.name === part.name);
     if (!skill) return `/skill:${part.name}`;
     const body = stripFrontmatter(readFileSync(skill.filePath, "utf8")).trim();

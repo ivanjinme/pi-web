@@ -655,10 +655,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     if (atQuery.quoted && after.startsWith('"')) {
       after = after.slice(1);
     }
-    const insert = buildAtInsertText(entry.path, entry.isDir, atQuery.quoted);
     const end = value.length - after.length;
-    editorRef.current?.replace(atQuery.start, end, textParts(insert.text));
-    requestAnimationFrame(() => editorRef.current?.focus(before.length + insert.cursorOffset));
+    if (entry.isDir) {
+      const insert = buildAtInsertText(entry.path, true, atQuery.quoted);
+      editorRef.current?.replace(atQuery.start, end, textParts(insert.text));
+      requestAnimationFrame(() => editorRef.current?.focus(before.length + insert.cursorOffset));
+    } else {
+      editorRef.current?.replace(atQuery.start, end, [{ type: "file", path: entry.path }, ...textParts(" ")]);
+    }
   }, [atQuery, value]);
 
   useEffect(() => {

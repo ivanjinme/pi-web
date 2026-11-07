@@ -2,8 +2,9 @@ import {
   $createParagraphNode, $createTextNode, $getRoot, $getSelection,
   $isElementNode, $isRangeSelection, $isTextNode, type LexicalNode,
 } from "lexical";
-import { textParts, type ComposerPart } from "@/lib/composer";
+import { composerPartText, textParts, type ComposerPart } from "@/lib/composer";
 import { $createSkillNode, SkillNode } from "./SkillNode";
+import { $createFileNode, FileNode } from "./FileNode";
 
 export function $readDocument() {
   const parts: ComposerPart[] = [];
@@ -22,7 +23,9 @@ export function $readDocument() {
       const text = node.getTextContent();
       const part: ComposerPart = node instanceof SkillNode
         ? { type: "skill", name: node.getName() }
-        : { type: "text", text };
+        : node instanceof FileNode
+          ? { type: "file", path: node.getPath() }
+          : { type: "text", text };
       const previous = parts.at(-1);
       if (part.type === "text" && previous?.type === "text") previous.text += text;
       else parts.push(part);
@@ -57,8 +60,8 @@ export function $replaceDocument(parts: ComposerPart[]) {
   let paragraph = $createParagraphNode();
   root.append(paragraph);
   for (const part of parts) {
-    if (part.type === "skill") {
-      paragraph.append($createSkillNode(part.name));
+    if (part.type !== "text") {
+      paragraph.append(part.type === "skill" ? $createSkillNode(part.name) : $createFileNode(part.path));
       continue;
     }
     for (const [index, line] of part.text.split("\n").entries()) {
@@ -106,14 +109,14 @@ export function $insertParts(parts: ComposerPart[]) {
   selection.removeText();
   for (const part of parts) {
     if (part.type === "text") selection.insertRawText(part.text);
-    else selection.insertNodes([$createSkillNode(part.name)]);
+    else selection.insertNodes([part.type === "skill" ? $createSkillNode(part.name) : $createFileNode(part.path)]);
   }
 }
 
 export function selectedParts(parts: ComposerPart[], start: number, end: number): ComposerPart[] {
   let offset = 0;
   return parts.flatMap((part) => {
-    const length = part.type === "text" ? part.text.length : part.name.length;
+    const length = composerPartText(part).length;
     const from = Math.max(0, start - offset);
     const to = Math.min(length, end - offset);
     offset += length;
