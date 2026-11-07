@@ -2245,6 +2245,9 @@ span.linenumber {
 
 .sidebar-user {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   flex-shrink: 0;
   padding: 8px;
   border-top: 1px solid var(--border);
@@ -2253,7 +2256,8 @@ span.linenumber {
 .sidebar-user-trigger {
   display: flex;
   align-items: center;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   height: 44px;
   gap: 9px;
   padding: 0 8px;
@@ -2286,6 +2290,68 @@ span.linenumber {
 
 .sidebar-user-name {
   flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-update-button,
+.desktop-update-downloading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  gap: 5px;
+  height: 32px;
+  padding: 0 6px;
+  color: var(--accent);
+}
+
+.desktop-update-button {
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--sidebar-bg));
+  color: #1d5dc0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.desktop-update-button:hover {
+  background: color-mix(in srgb, var(--accent) 15%, var(--sidebar-bg));
+}
+
+html.dark .desktop-update-button {
+  color: var(--accent);
+}
+
+.desktop-update-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.desktop-update-button svg,
+.desktop-update-downloading svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.desktop-update-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desktop-update-spinner {
+    animation: none;
+  }
 }
 
 .sidebar-user-menu {

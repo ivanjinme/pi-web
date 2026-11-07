@@ -8,6 +8,11 @@
   "files": [
     "electron/main.mjs",
     "electron/navigation.mjs",
+    "electron/preload.cjs",
+    "electron/updates.mjs",
+    "electron/update-signature.mjs",
+    "electron/update-install.mjs",
+    "electron/update-gate.mjs",
     "electron/production.mjs",
     "electron/runtime.mjs",
     "electron/server.mjs",
@@ -20,6 +25,11 @@
     "description": "Weclio - Build an AI Scientist"
   },
   "extraResources": [
+    {
+      "from": "resources",
+      "to": ".",
+      "filter": ["desktop-update.json"]
+    },
     {
       "from": "build/desktop/server",
       "to": "server",

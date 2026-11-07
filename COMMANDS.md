@@ -21,14 +21,17 @@ Never run `next build` during development; it pollutes `.next/`.
 ## Windows desktop package
 
 ```bash
-npm version <version> --no-git-tag-version  # Shared Web/desktop version
-npm run release:desktop                     # Test, build, installer + SHA256
+npm run setup:desktop-updates               # Initialize/check external signing key + public config
+npm version <version> --no-git-tag-version  # Shared Web/desktop stable version
+npm run release:desktop                     # Test, build, EXE + blockmap + signed manifest + SHA256
 npm run release:desktop -- --quick          # Reuse unchanged full build
 ```
 
 打包前手动准备最新版 Portable Git（含 Bash）、rg、fd 至 `resources/runtime/win-x64/`；已有可用工具无需更新。
 Windows x64; output `build/desktop/dist/`.
-Unsigned; manual install/upgrade/uninstall acceptance. No commit, tag or upload.
+EXE 未做 Windows 代码签名；更新清单使用 Ed25519 签名。私钥必须备份到仓库外。
+Manual install/upgrade/uninstall acceptance. No commit, tag or upload (`--publish never`).
+Desktop release procedure: `docs/desktop-release.md`; use `desktop-v<version>` tags, not npm's `v*` tags.
 Node 22.19+ with npm required on user machines; Python/Pandoc/Office not bundled.
 
 ## Publish

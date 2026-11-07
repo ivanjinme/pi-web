@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { existsSync, realpathSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { validateAgentImages } from "./image-attachments";
+import { beginDesktopTask } from "./desktop-update-gate";
 import type { ComposerPart } from "./composer";
 import { expandSkillParts } from "./skill-input";
 import { invalidateModelsCache } from "./models-cache";
@@ -272,6 +273,7 @@ export class AgentSessionWrapper {
     }
     if (this.extensionBindingPromise) return this.extensionBindingPromise;
 
+    const finishBinding = beginDesktopTask();
     this.extensionBindingError = null;
     this.extensionBindingPromise = (async () => {
       if (!this._alive) return;
@@ -311,7 +313,7 @@ export class AgentSessionWrapper {
     })().catch((err) => {
       this.extensionBindingError = err;
       throw err;
-    });
+    }).finally(finishBinding);
 
     return this.extensionBindingPromise;
   }
@@ -405,6 +407,17 @@ export class AgentSessionWrapper {
 
   async send(command: Record<string, unknown>): Promise<unknown> {
     const type = command.type as string;
+    const passive = type.startsWith("get_") || type === "abort" || type === "abort_compaction" || type === "abort_bash" || type === "extension_ui_response" || type === "extension_ui_input";
+    const finish = passive ? undefined : beginDesktopTask();
+    try {
+      return await this.sendCommand(command);
+    } finally {
+      finish?.();
+    }
+  }
+
+  private async sendCommand(command: Record<string, unknown>): Promise<unknown> {
+    const type = command.type as string;
     if (type !== "get_state") this.resetIdleTimer();
     if (this.shouldWaitForExtensions(type)) await this.waitForExtensionsBound();
 
@@ -433,11 +446,21 @@ export class AgentSessionWrapper {
         this.persistPendingSession();
         invalidateSessionListCache();
         notifyRunningChange();
-        this.inner.prompt(message, {
-          ...(promptImages?.length ? { images: promptImages } : {}),
-          ...(streamingBehavior ? { streamingBehavior } : {}),
-          source: "rpc",
-        }).then(() => {
+        const finishPrompt = beginDesktopTask();
+        let execution: Promise<void>;
+        try {
+          execution = this.inner.prompt(message, {
+            ...(promptImages?.length ? { images: promptImages } : {}),
+            ...(streamingBehavior ? { streamingBehavior } : {}),
+            source: "rpc",
+          });
+        } catch (error) {
+          this.promptRunning = false;
+          finishPrompt();
+          notifyRunningChange();
+          throw error;
+        }
+        execution.then(() => {
           this.promptRunning = false;
           this.resetIdleTimer();
           if (!streamingBehavior) this.emit({ type: "prompt_done" });
@@ -459,7 +482,7 @@ export class AgentSessionWrapper {
           });
           if (!streamingBehavior) this.emit({ type: "prompt_done" });
           notifyRunningChange();
-        });
+        }).finally(finishPrompt);
         return null;
       }
 
@@ -1152,6 +1175,15 @@ export class AgentSessionWrapper {
 
 // 自动命名保留在 facade，HTTP route 不接触 SDK session。
 export async function autoNameRpcSession(session: AgentSessionWrapper, onlyIfUnnamed = false) {
+  const finish = beginDesktopTask();
+  try {
+    return await generateRpcSessionName(session, onlyIfUnnamed);
+  } finally {
+    finish();
+  }
+}
+
+async function generateRpcSessionName(session: AgentSessionWrapper, onlyIfUnnamed: boolean) {
   // 热更新后 globalThis 中可能仍有旧 wrapper，沿用原有 readiness 兼容。
   await session.waitUntilReady?.();
   const hasTitleRecord = () => session.inner.sessionManager.getEntries().some((entry) => entry.type === "session_info");
@@ -1253,6 +1285,12 @@ export async function destroyRpcSessionsForCwd(cwd: string): Promise<number> {
   return destroyRpcSessionsForCwds([cwd]);
 }
 
+export function hasBusyDesktopTasks(): boolean {
+  return getLocks().size > 0 || getStartingSessionCwds().size > 0 || Array.from(getRegistry().values()).some(
+    (session) => session.isRunning() || (session.isAlive() && session.inner.pendingMessageCount > 0),
+  );
+}
+
 export function getRunningRpcSessionIds(): string[] {
   const ids = new Set<string>();
   for (const [sessionId, session] of getRegistry()) {
@@ -1323,6 +1361,7 @@ export async function startRpcSession(
   const inflight = locks.get(sessionId);
   if (inflight) return inflight;
 
+  const finishTask = beginDesktopTask();
   const finishStartingSession = trackStartingSession(cwd);
   const starting = (async () => {
     // Some extensions access the SDK's global theme even outside the terminal UI.
@@ -1380,6 +1419,7 @@ export async function startRpcSession(
   })().finally(() => {
     locks.delete(sessionId);
     finishStartingSession();
+    finishTask();
   });
 
   locks.set(sessionId, starting);

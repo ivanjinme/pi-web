@@ -1,5 +1,8 @@
-import { app, BrowserWindow, dialog, shell } from "electron";
-import { SERVER_URL, isAppUrl, isExternalUrl, isPermissionAllowed } from "./navigation.mjs";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { fileURLToPath } from "node:url";
+import { initializeUpdates, registerUpdateBridge, UPDATE_CHANNELS } from "./updates.mjs";
+import { createUpdateInstaller } from "./update-install.mjs";
+import { SERVER_URL, isAppUrl, isExternalUrl, isPermissionAllowed, restoreDesktopPort } from "./navigation.mjs";
 import { startProductionServer } from "./production.mjs";
 
 app.setName("Weclio");
@@ -7,6 +10,17 @@ let mainWindow = null;
 let service = null;
 let quitting = false;
 const startup = new AbortController();
+let updates = null;
+const installer = createUpdateInstaller({
+  app, dialog, getService: () => updates, getWindow: () => mainWindow, getGate: () => service?.updateGate,
+  restoreWindow: async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      const window = createMainWindow();
+      await window.loadURL(SERVER_URL);
+    }
+  },
+});
+const removeUpdateBridge = registerUpdateBridge({ ipcMain, getWindow: () => mainWindow, isAppUrl, getService: () => updates, dialog, installer });
 
 function showError(message) {
   service?.stop();
@@ -15,18 +29,26 @@ function showError(message) {
   app.exit(1);
 }
 
-app.on("window-all-closed", () => app.quit());
-app.on("before-quit", () => {
+app.on("window-all-closed", () => { if (!installer.isClosing()) app.quit(); });
+app.on("before-quit", (event) => {
+  // 标准 updater 可能已安排退出；启动失败的恢复流程必须能否决这次退出。
+  if (installer.isRecovering()) event.preventDefault();
+});
+// before-quit 之后仍可能被 renderer 否决；只在真正退出时停止服务。
+app.on("will-quit", () => {
   console.log("[desktop] 正在退出。");
   quitting = true;
   service?.stop();
   startup.abort();
+  installer.dispose();
+  updates?.stop();
+  removeUpdateBridge();
 });
 app.on("child-process-gone", (_event, details) => {
   console.error(`[desktop] ${details.type} 进程退出: ${details.reason} (${details.exitCode})`);
 });
 
-app.whenReady().then(async () => {
+function createMainWindow() {
   const window = new BrowserWindow({
     title: "Weclio",
     width: 1440,
@@ -40,6 +62,7 @@ app.whenReady().then(async () => {
       titleBarOverlay: { color: "#f8f7ff", symbolColor: "#1d1e21", height: 40 },
     } : {}),
     webPreferences: {
+      preload: fileURLToPath(new URL("./preload.cjs", import.meta.url)),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -120,6 +143,12 @@ app.whenReady().then(async () => {
       else app.quit();
     }).catch((error) => console.error("[desktop] 无法显示恢复提示:", error));
   });
+  return window;
+}
+
+app.whenReady().then(async () => {
+  if (app.isPackaged) restoreDesktopPort(app.getPath("userData"));
+  const window = createMainWindow();
   if (app.isPackaged) {
     // 先显示可关闭的启动页；异步初始化不能让慢磁盘上的首次启动看起来毫无响应。
     const html = '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Weclio</title><style>body{margin:0;background:#f8f7ff;color:#1d1e21;font:16px system-ui;display:grid;place-content:center;min-height:100vh}h1{font-size:24px;font-weight:500}p{color:#625e70}</style><main role="status"><h1>正在启动 Weclio</h1><p>首次打开需要准备内置扩展与技能，请稍候。</p></main></html>';
@@ -132,5 +161,14 @@ app.whenReady().then(async () => {
       onUnexpectedExit: (error) => showError(error.message),
     });
   }
-  if (!quitting) await window.loadURL(SERVER_URL);
+  if (!quitting) {
+    await window.loadURL(SERVER_URL);
+    // 页面就绪后再启动后台检查，不阻塞首屏；缺少配置时保持静默。
+    void initializeUpdates({ app, publish: (state) => {
+      if (mainWindow && !mainWindow.isDestroyed() && isAppUrl(mainWindow.webContents.getURL())) mainWindow.webContents.send(UPDATE_CHANNELS.state, state);
+    } }).then((service) => {
+      if (quitting) service?.stop();
+      else { updates = service; updates?.start(); }
+    }).catch((error) => console.error("[desktop-update]", error.message));
+  }
 }).catch((error) => { if (!quitting) showError(error.message); });

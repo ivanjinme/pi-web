@@ -1,0 +1,5 @@
+{
+  "manifestUrl": "https://github.com/ivanjinme/pi-web/releases/latest/download/desktop-update-manifest.json",
+  "updaterCacheDirName": "@wecliopi-web-updater",
+  "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAeVyP1gK7Ew5g5BEDPLostTKZdx3yEJyXDpmXJskHOks=\n-----END PUBLIC KEY-----\n"
+}

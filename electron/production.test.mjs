@@ -110,6 +110,59 @@ test("cancelling first startup terminates its initializer before returning", asy
   }
 });
 
+test("only the Next child owns update IPC and unexpected exits still surface", async (t) => {
+  const resources = await mkdtemp(join(tmpdir(), "weclio-production-ipc-"));
+  t.after(() => rm(resources, { recursive: true, force: true }));
+  for (const file of ["server/.next/BUILD_ID", "server/node_modules/next/dist/bin/next", "runtime/win-x64/git/bin/bash.exe", "runtime/win-x64/git/cmd/git.exe", "runtime/win-x64/tools/rg.exe", "runtime/win-x64/tools/fd.exe"]) {
+    await mkdir(dirname(join(resources, file)), { recursive: true });
+    await writeFile(join(resources, file), "fixture");
+  }
+  const mock = `
+    import assert from 'node:assert/strict';
+    import {EventEmitter} from 'node:events';
+    export function spawn(command,args,options) {
+      const child=Object.assign(new EventEmitter(),{stdout:new EventEmitter(),stderr:new EventEmitter(),connected:true,exitCode:null,signalCode:null});
+      child.send=(message,cb)=>{cb?.();queueMicrotask(()=>child.emit('message',{type:'weclio-desktop-update-result',id:message.id,status:'ready'}));};
+      if(args[0].endsWith('desktop-packages.mjs')) {
+        assert.deepEqual(options.stdio,['ignore','pipe','pipe']);
+        assert.equal(options.env.WECLIO_DESKTOP_UPDATE_IPC,undefined);
+        queueMicrotask(()=>child.emit('close',0));
+      } else {
+        assert.deepEqual(options.stdio,['ignore','pipe','pipe','ipc']);
+        assert.equal(options.env.WECLIO_DESKTOP_UPDATE_IPC,'1');
+        globalThis.fixtureNext=child;
+        queueMicrotask(()=>child.stdout.emit('data','Ready in fixture'));
+      }
+      return child;
+    }
+    export function spawnSync(command,args) {
+      if(args[0]==='-p')return {status:0,stdout:JSON.stringify({executable:process.execPath,version:process.versions.node,arch:'x64'})};
+      return {status:0,stdout:'11.0.0'};
+    }
+  `;
+  const serverMock = `export async function assertPortAvailable(){};export async function waitForServer(url,options){await Promise.resolve();if(!options.isReady())throw Error('Not ready');}`;
+  const script = `
+    import assert from 'node:assert/strict';
+    import {registerHooks} from 'node:module';
+    registerHooks({resolve(name,context,next){
+      if(name==='node:child_process')return {url:${JSON.stringify(`data:text/javascript,${encodeURIComponent(mock)}`)},shortCircuit:true};
+      if(name==='./server.mjs')return {url:${JSON.stringify(`data:text/javascript,${encodeURIComponent(serverMock)}`)},shortCircuit:true};
+      return next(name,context);
+    }});
+    const {startProductionServer}=await import(${JSON.stringify(new URL("./production.mjs", import.meta.url).href)});
+    let failure;
+    const server=await startProductionServer({resourcesPath:${JSON.stringify(resources)},logsPath:${JSON.stringify(join(resources, "logs"))},url:'http://127.0.0.1:0',onUnexpectedExit:error=>{failure=error;}});
+    assert.equal(await server.updateGate.lock(),'ready');
+    const pending=server.updateGate.inspect();
+    globalThis.fixtureNext.emit('exit',1);
+    await assert.rejects(pending,/exited/);
+    assert.match(failure.message,/Web 服务已退出/);
+    assert.equal(globalThis.fixtureNext.listenerCount('message'),0);
+    server.stop();
+  `;
+  execFileSync(process.execPath, ["--input-type=module", "-e", script], { stdio: "pipe", timeout: 20_000 });
+});
+
 test("with no system Git, Pi discovers bundled Bash, rg and fd through only the child PATH", {
   skip: process.platform !== "win32" || !existsSync(join(runtime, "git/bin/bash.exe")),
 }, async (t) => {

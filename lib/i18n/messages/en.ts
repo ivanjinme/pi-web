@@ -31,6 +31,8 @@ export const enLocale: LocalePlugin = {
     "settings.piVersion": "Pi ",
     "sidebar.hide": "Hide sidebar",
     "sidebar.show": "Show sidebar",
+    "desktopUpdate.downloading": "Downloading update",
+    "desktopUpdate.restart": "New version",
     "theme.light": "Switch to light mode",
     "theme.dark": "Switch to dark mode",
     "history.full": "Trace",

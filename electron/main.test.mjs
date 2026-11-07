@@ -16,6 +16,7 @@ export const dialog = {
   showErrorBox(...args) { this.errors.push(args); },
   async showMessageBox(...args) { this.prompts.push(args); return { response: 0 }; }
 };
+export const ipcMain = { handle() {}, removeHandler() {} };
 export const shell = {
   opened: [],
   async openExternal(url) { this.opened.push(url); }
@@ -41,7 +42,7 @@ export class BrowserWindow extends EventEmitter {
 }
 `;
 
-function runMain(check, platform = process.platform, packaged = false, pending = false) {
+function runMain(check, platform = process.platform, packaged = false, pending = false, setup = "") {
   const mockUrl = `data:text/javascript,${encodeURIComponent(mock)}`;
   const productionUrl = `data:text/javascript,${encodeURIComponent(`
     import assert from 'node:assert/strict';
@@ -66,10 +67,17 @@ function runMain(check, platform = process.platform, packaged = false, pending =
       return next(specifier, context);
     }});
     const { app, BrowserWindow, dialog, shell } = await import('electron');
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const profile = mkdtempSync(join(tmpdir(), 'weclio-main-test-'));
+    process.on('exit', () => rmSync(profile, { recursive: true, force: true }));
+    app.getPath = (name) => name === 'userData' ? profile : 'test-logs';
     const production = ${packaged} ? await import(${JSON.stringify(productionUrl)}) : null;
     app.isPackaged = ${packaged};
     process.resourcesPath = 'test-resources';
     Object.defineProperty(process, 'platform', { value: ${JSON.stringify(platform)} });
+    ${setup}
     await import(${JSON.stringify(mainUrl)});
     await setImmediate();
     const window = BrowserWindow.windows[0];
@@ -89,11 +97,11 @@ test("desktop waits for its first paint before showing the window", () => {
   `);
 });
 
-test("Windows overlays native window controls without a preload or renderer Node integration", () => {
+test("Windows overlays native window controls with a sandboxed preload and no renderer Node integration", () => {
   runMain(`
     assert.equal(window.options.titleBarStyle, 'hidden');
     assert.deepEqual(window.options.titleBarOverlay, { color: '#f8f7ff', symbolColor: '#1d1e21', height: 40 });
-    assert.equal(window.options.webPreferences.preload, undefined);
+    assert.match(window.options.webPreferences.preload, /preload\.cjs$/);
     assert.equal(window.options.webPreferences.nodeIntegration, false);
     assert.equal(window.options.webPreferences.contextIsolation, true);
   `, 'win32');
@@ -169,15 +177,35 @@ test("packaged mode shows initialization before starting its service and stops i
     assert.equal(production.starts[0].url, window.urls[1]);
     assert.equal(production.starts[0].signal.aborted, false);
     app.emit('before-quit');
+    assert.equal(production.stops, 0);
+    assert.equal(production.starts[0].signal.aborted, false);
+    app.emit('will-quit');
     assert.equal(production.stops, 1);
     assert.equal(production.starts[0].signal.aborted, true);
   `, 'win32', true);
+});
+
+test("packaged startup restores its remembered port before loading or authorizing the window", () => {
+  runMain(`
+    assert.equal(production.starts[0].url, 'http://127.0.0.1:8890');
+    assert.equal(window.urls[1], 'http://127.0.0.1:8890');
+    const navigation = await import(new URL('./navigation.mjs', ${JSON.stringify(mainUrl)}).href);
+    assert.equal(navigation.isAppUrl('http://127.0.0.1:8890/api/sessions'), true);
+    assert.equal(navigation.isAppUrl('http://127.0.0.1:8888/api/sessions'), false);
+  `, 'win32', true, false, `
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(join(profile, 'desktop-port.json'), JSON.stringify({ port: 8890 }));
+    delete process.env.PORT;
+    delete process.env.WECLIO_DESKTOP_URL;
+  `);
 });
 
 test("closing the startup window cancels initialization without a failure dialog", () => {
   runMain(`
     assert.equal(window.urls.length, 1);
     app.emit('before-quit');
+    assert.equal(production.starts[0].signal.aborted, false);
+    app.emit('will-quit');
     await setImmediate();
     assert.equal(production.starts[0].signal.aborted, true);
     assert.equal(window.urls.length, 1);

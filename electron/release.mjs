@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
-import { cp, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import nodeVersion from "../bin/node-version.js";
+import { prepareSignedUpdate, readReleaseSigning } from "./update-release.mjs";
+export { validateInstaller } from "./update-release.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const require = createRequire(import.meta.url);
@@ -26,6 +28,10 @@ export async function fingerprint(base, paths = inputs) {
   return hash.digest("hex");
 }
 
+export function fingerprintPackaging(base) {
+  return fingerprint(base, ["electron", "resources/desktop-update.json", "resources/runtime/win-x64/git", "resources/runtime/win-x64/tools", "bin/node-version.js"]);
+}
+
 export async function validateVersion(base) {
   const pkg = JSON.parse(await readFile(join(base, "package.json"), "utf8"));
   const lock = JSON.parse(await readFile(join(base, "package-lock.json"), "utf8"));
@@ -35,22 +41,28 @@ export async function validateVersion(base) {
   return pkg.version;
 }
 
-export async function validateInstaller(file) {
-  const handle = await open(file, "r");
+export async function retainDesktopRelease({ output, dist, version, signing }) {
+  const name = `Weclio-${version}-x64-Setup.exe`;
+  const installerPath = join(output, name);
+  const blockmapPath = `${installerPath}.blockmap`;
+  // 所有产物校验与签名成功后，才开始替换 dist；更新清单最后就位。
+  const prepared = await prepareSignedUpdate({ version, installerPath, blockmapPath, signing });
+  const manifestHash = createHash("sha256").update(prepared.manifest).digest("hex");
+  const sums = `${prepared.sha256}  ${name}\n${prepared.blockmapSha256}  ${name}.blockmap\n${manifestHash}  ${prepared.manifestName}\n`;
+  await mkdir(dist, { recursive: true });
+  const stage = await mkdtemp(join(dist, ".release-"));
   try {
-    const info = await handle.stat();
-    const header = Buffer.alloc(64);
-    if (info.size < 64 || (await handle.read(header, 0, 64, 0)).bytesRead !== 64 || header.toString("ascii", 0, 2) !== "MZ") throw new Error("安装包不是有效的 Windows PE 文件。");
-    const offset = header.readUInt32LE(60);
-    const signature = Buffer.alloc(4);
-    // NSIS 安装器外壳可为 32 位；目标架构由 builder 的 --x64 指定。
-    if (offset > info.size - 4 || (await handle.read(signature, 0, 4, offset)).bytesRead !== 4 || signature.readUInt32LE(0) !== 0x4550) throw new Error("安装包 PE 签名无效。");
+    await cp(installerPath, join(stage, name));
+    await cp(blockmapPath, join(stage, `${name}.blockmap`));
+    await writeFile(join(stage, prepared.manifestName), prepared.manifest);
+    await writeFile(join(stage, "SHA256SUMS.txt"), sums);
+    for (const file of [name, `${name}.blockmap`, "SHA256SUMS.txt", prepared.manifestName]) {
+      await rename(join(stage, file), join(dist, file));
+    }
   } finally {
-    await handle.close();
+    await rm(stage, { recursive: true, force: true });
   }
-  const hash = createHash("sha256");
-  for await (const chunk of createReadStream(file)) hash.update(chunk);
-  return hash.digest("hex");
+  return { installerPath: join(dist, name), blockmapPath: join(dist, `${name}.blockmap`), manifestPath: join(dist, prepared.manifestName), sha256: prepared.sha256 };
 }
 
 function run(command, args) {
@@ -66,6 +78,9 @@ async function main() {
   if (args.some((arg) => arg !== "--quick") || args.length > 1) throw new Error("用法: npm run release:desktop [-- --quick]");
   if (process.platform !== "win32" || process.arch !== "x64" || !nodeVersion.isNodeVersionSupported(process.versions.node)) throw new Error("需要 Windows x64 和 Node.js 22.19+。");
   const version = await validateVersion(root);
+  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version) || version.split(".").some((part) => !Number.isSafeInteger(Number(part)))) throw new Error("桌面更新仅接受正式版本号。");
+  const packagingFingerprint = await fingerprintPackaging(root);
+  const signing = await readReleaseSigning({ root });
   const server = join(root, "build/desktop/server");
   const snapshot = join(root, "build/desktop/server-inputs.json");
   const dist = join(root, "build/desktop/dist");
@@ -90,21 +105,10 @@ async function main() {
   try {
     const builder = require.resolve("electron-builder/cli.js");
     const saved = JSON.parse(await readFile(snapshot, "utf8"));
-    await run(process.execPath, [builder, "--config", "electron/builder.json", "--win", "--x64", "--config.directories.output", output]);
-    if (await fingerprint(root) !== initial || saved.server !== await fingerprint(server, [".next", "node_modules", "package.json", "next.config.js", "desktop-packages.mjs", "public", "LICENSE"])) throw new Error("打包过程中源文件或构建产物变化，请重新执行。");
-    const name = `Weclio-${version}-x64-Setup.exe`;
-    const file = join(output, name);
-    const hash = await validateInstaller(file);
-    await mkdir(dist, { recursive: true });
-    // 先验证新产物，再替换旧文件；失败时不把旧文件误报为本次构建。
-    const staged = join(dist, `${name}.new`);
-    await cp(file, staged);
-    await rename(staged, join(dist, name));
-    // 不保留同名旧 blockmap，避免它与新安装包不匹配。
-    await rm(join(dist, `${name}.blockmap`), { force: true });
-    await writeFile(join(dist, "SHA256SUMS.txt.new"), `${hash}  ${name}\n`);
-    await rename(join(dist, "SHA256SUMS.txt.new"), join(dist, "SHA256SUMS.txt"));
-    console.log(`\n安装包: ${join(dist, name)}\nSHA256: ${hash}\n未签名；请在干净 Windows 环境验收后手动发布。`);
+    await run(process.execPath, [builder, "--config", "electron/builder.json", "--win", "--x64", "--publish", "never", "--config.directories.output", output]);
+    if (await fingerprint(root) !== initial || await fingerprintPackaging(root) !== packagingFingerprint || saved.server !== await fingerprint(server, [".next", "node_modules", "package.json", "next.config.js", "desktop-packages.mjs", "public", "LICENSE"])) throw new Error("打包过程中源文件或构建产物变化，请重新执行。");
+    const result = await retainDesktopRelease({ output, dist, version, signing });
+    console.log(`\n安装包: ${result.installerPath}\n差异文件: ${result.blockmapPath}\n签名清单: ${result.manifestPath}\nSHA256: ${result.sha256}\n更新清单已作 Ed25519 签名；EXE 未做 Windows 代码签名。验收后手动发布 desktop-v${version}，本命令不会上传。`);
   } finally {
     await rm(output, { recursive: true, force: true, maxRetries: 3 });
   }

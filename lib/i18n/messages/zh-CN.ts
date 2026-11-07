@@ -31,6 +31,8 @@ export const zhCNLocale: LocalePlugin = {
     "settings.piVersion": "Pi ",
     "sidebar.hide": "隐藏侧边栏",
     "sidebar.show": "显示侧边栏",
+    "desktopUpdate.downloading": "正在下载更新",
+    "desktopUpdate.restart": "新版本",
     "theme.light": "切换到浅色模式",
     "theme.dark": "切换到深色模式",
     "history.full": "Trace",

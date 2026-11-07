@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { fingerprint, validateInstaller, validateVersion } from "./release.mjs";
+import { fingerprint, fingerprintPackaging, validateInstaller, validateVersion } from "./release.mjs";
 
 async function fixture(t) {
   const dir = await mkdtemp(join(tmpdir(), "weclio-release-"));
@@ -47,6 +47,24 @@ test("a clean checkout does not require or fingerprint generated next-env.d.ts",
   assert.equal(await fingerprint(dir), first);
   await rm(join(dir, "instrumentation.ts"));
   await assert.rejects(fingerprint(dir), { code: "ENOENT" });
+});
+
+test("packaging fingerprint covers the shipped runtime, trust config, shell and Node helper", async (t) => {
+  const dir = await fixture(t);
+  const files = ["electron/main.mjs", "electron/builder.json", "resources/desktop-update.json", "resources/runtime/win-x64/git/bin/bash.exe", "resources/runtime/win-x64/tools/rg.exe", "bin/node-version.js"];
+  for (const file of files) {
+    await mkdir(dirname(join(dir, file)), { recursive: true });
+    await writeFile(join(dir, file), "first");
+  }
+  const initial = await fingerprintPackaging(dir);
+  for (const file of files) {
+    await writeFile(join(dir, file), "other");
+    assert.notEqual(await fingerprintPackaging(dir), initial, file);
+    await writeFile(join(dir, file), "first");
+    assert.equal(await fingerprintPackaging(dir), initial, file);
+  }
+  await writeFile(join(dir, "resources/runtime/win-x64/unused.txt"), "not packaged");
+  assert.equal(await fingerprintPackaging(dir), initial);
 });
 
 test("installer validation checks PE signature and computes SHA256", async (t) => {

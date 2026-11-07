@@ -12,6 +12,7 @@ import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { TabBar, type Tab } from "./TabBar";
 import { SettingsModal } from "./SettingsModal";
 import { CodexUsagePanel } from "./CodexUsagePanel";
+import { DesktopUpdateButton } from "./DesktopUpdateButton";
 import { useCodexUsage } from "@/hooks/useCodexUsage";
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator } from "./BranchNavigator";
@@ -795,6 +796,7 @@ export function AppShell() {
           <span className="sidebar-user-avatar">S</span>
           <span className="sidebar-user-name">super user</span>
         </button>
+        <DesktopUpdateButton />
       </div>
     </>
   );

@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import nodeVersion from "../bin/node-version.js";
 import { createRuntimeEnvironment } from "./runtime.mjs";
 import { assertPortAvailable, waitForServer } from "./server.mjs";
+import { createUpdateGate } from "./update-gate.mjs";
 
 export function resolveSystemNode(env = process.env) {
   const options = { env, encoding: "utf8", windowsHide: true, timeout: 10_000 };
@@ -67,8 +68,9 @@ export async function startProductionServer({ resourcesPath, logsPath, url, onUn
   const require = createRequire(import.meta.url);
   const next = require.resolve(join(root, "node_modules", "next", "dist", "bin", "next"));
   const child = spawn(node, [next, "start", "-H", "127.0.0.1", "-p", String(port)], {
-    cwd: root, env, windowsHide: true, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"],
+    cwd: root, env: { ...env, WECLIO_DESKTOP_UPDATE_IPC: "1" }, windowsHide: true, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
+  const updateGate = createUpdateGate(child);
   const controller = new AbortController();
   let ready = false;
   let stopping = false;
@@ -77,6 +79,7 @@ export async function startProductionServer({ resourcesPath, logsPath, url, onUn
   const stop = () => {
     if (stopping) return;
     stopping = true;
+    updateGate.dispose({ unlock: false });
     controller.abort();
     process.off("exit", stop);
     signal?.removeEventListener("abort", stop);
@@ -99,6 +102,7 @@ export async function startProductionServer({ resourcesPath, logsPath, url, onUn
   const failed = (error) => {
     if (stopping) return;
     failure = error;
+    updateGate.dispose({ unlock: false });
     record(`[desktop] ${error.message}\n`);
     controller.abort();
     if (ready) onUnexpectedExit(error);
@@ -114,7 +118,7 @@ export async function startProductionServer({ resourcesPath, logsPath, url, onUn
     });
     if (failure) throw failure;
     ready = true;
-    return { stop, logFile };
+    return { stop, logFile, updateGate };
   } catch (error) {
     stop();
     throw failure ?? new Error(`${error.message}\n服务日志: ${logFile}`);

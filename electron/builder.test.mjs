@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { FileMatcher, copyFiles } from "app-builder-lib/out/fileMatcher.js";
+import { AppInfo } from "app-builder-lib/out/appInfo.js";
+import { fileURLToPath } from "node:url";
+import { loadUpdateConfig, makeDownloadOnlyUpdater } from "./updates.mjs";
 
 const config = JSON.parse(await readFile(new URL("./builder.json", import.meta.url), "utf8"));
 
@@ -25,6 +28,20 @@ test("server dependencies have a dedicated resource mapping, including nested de
   // builder 对映射根目录下的 node_modules 有特殊过滤，必须从目录本身开始复制。
   await copyFiles([new FileMatcher(source, destination, (value) => value, ["**/*"])]);
   for (const file of files) assert.equal(await readFile(join(destination, file), "utf8"), file);
+});
+
+test("updater main modules and sandbox preload are packaged with optional fixed config", () => {
+  for (const name of ["preload.cjs", "updates.mjs", "update-signature.mjs", "update-install.mjs", "update-gate.mjs"]) assert.ok(config.files.includes(`electron/${name}`));
+  assert.deepEqual(config.extraResources.find((entry) => entry.from === "resources"), { from: "resources", to: ".", filter: ["desktop-update.json"] });
+});
+
+test("production updater cache matches the installer cache instead of the development fallback", async () => {
+  const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  const packager = new AppInfo({ metadata: { ...pkg, ...config.extraMetadata }, config });
+  const runtime = await loadUpdateConfig({ packaged: true, resourcesPath: fileURLToPath(new URL("../resources/", import.meta.url)) });
+  assert.equal(runtime.updaterCacheDirName, packager.updaterCacheDirName);
+  const Updater = makeDownloadOnlyUpdater(class {}, runtime.updaterCacheDirName);
+  assert.equal((await new Updater().loadUpdateConfig()).updaterCacheDirName, packager.updaterCacheDirName);
 });
 
 test("desktop metadata supplies the branded Windows shortcut description", () => {
