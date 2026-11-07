@@ -59,7 +59,7 @@ function titleLoaderHarness(fetch) {
     },
     normalizedSessionSearch: "search",
     projectsOpen: true, visibleProjectGroups: [], pinsOpen: false, visiblePins: [],
-    projectGroups: [], projectVisibleCounts: {}, selectedSessionId: null,
+    projectGroups: [], projectVisibleCounts: {}, collapsedProjects: {}, selectedSessionId: null,
     sseAuthoritativeRef: { current: true },
     setRunningSessionIds() {}, setUnreadSessionIds() {},
   });
@@ -180,18 +180,75 @@ test("a superseded title response cannot overwrite the refreshed catalog", async
   assert.equal(harness.current.allSessions[0].name, "Current title");
 });
 
-test("project history reveals ten more threads per click and resets after the last page", () => {
+test("project history reveals ten more threads per click without Show less", () => {
   assert.match(source, /const visibleCount = projectVisibleCounts\[group\.root\] \?\? 5;/);
   assert.match(source, /const hasMore = roots\.length > visibleCount;/);
   assert.match(source, /const visibleRoots = visibleThreadRoots\(group, visibleCount, selectedSessionId\);/);
   assert.match(source, /\{visibleRoots\.map\(\(node\) => \(/);
-  assert.match(source, /\.\.\.previous,\s*\[group\.root\]: hasMore \? \(previous\[group\.root\] \?\? 5\) \+ 10 : 5,/);
-  assert.match(source, /\{hasMore \? "Show more" : "Show less"\}/);
+  assert.match(source, /\.\.\.previous,\s*\[group\.root\]: \(previous\[group\.root\] \?\? 5\) \+ 10,/);
+  assert.match(source, /\{hasMore && \(/);
+  assert.doesNotMatch(source, /Show less/);
 
   const group = historyGroup();
   for (const count of [5, 15, 25, 5]) {
     assert.deepEqual(visibleThreadRoots(group, count, null), group.roots.slice(0, count));
   }
+});
+
+test("project name toggles history and resets pagination without selecting or creating a thread", () => {
+  const start = source.indexOf("  function renderProjectGroup(");
+  const end = source.indexOf("\n  return (", start);
+  const compiled = ts.transpileModule(`${source.slice(start, end)}\nrenderProjectGroup`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
+  }).outputText;
+  const context = {
+    React: { createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }) },
+    projectVisibleCounts: {}, collapsedProjects: {}, selectedSessionId: null,
+    projectLabels: {}, pinnedProjects: new Set(), highlightedProjectRoot: null,
+    projectPathKey: (root) => root, projectDefaultLabel: (root) => root,
+    visibleThreadRoots, FolderIcon() {}, SidebarMoreMenu() {}, SessionTreeItem() {},
+    runningSessionIds: new Set(), unreadSessionIds: new Set(), pinnedSessionIds: new Set(),
+    pinsReady: true, pinsBusy: false, handleSelectSessionFromList() {}, loadSessions() {},
+    handleSessionDeleted() {}, toggleSessionPin() {},
+    createNewSession: (root) => created.push(root),
+    setCollapsedProjects: (update) => { context.collapsedProjects = update(context.collapsedProjects); },
+    setProjectVisibleCounts: (update) => { context.projectVisibleCounts = update(context.projectVisibleCounts); },
+  };
+  const created = [];
+  const render = runInNewContext(compiled, context);
+  const group = { ...historyGroup(), root: "/project" };
+  const main = (tree) => tree.children[0].children[0];
+  const history = (tree) => tree.children[1];
+  let tree = render(group);
+  assert.equal(main(tree).props["aria-expanded"], true);
+  assert.equal(main(tree).children[0].props.open, true);
+  assert.equal(history(tree).children[0].length, 5);
+  history(tree).children[1].props.onClick();
+  tree = render(group);
+  assert.equal(history(tree).children[0].length, 15);
+  main(tree).props.onClick();
+  tree = render(group);
+  assert.equal(main(tree).props["aria-expanded"], false);
+  assert.equal(main(tree).children[0].props.open, false);
+  assert.equal(history(tree), false);
+  main(tree).props.onClick();
+  tree = render(group);
+  assert.equal(history(tree).children[0].length, 5);
+  history(tree).children[1].props.onClick();
+  tree = render(group);
+  history(tree).children[1].props.onClick();
+  tree = render(group);
+  assert.equal(history(tree).children[0].length, 20);
+  assert.equal(history(tree).children[1], false);
+  assert.deepEqual(created, []);
+  tree.children[0].children[2].props.onClick();
+  assert.deepEqual(created, ["/project"]);
+  tree = render({ root: "/empty", roots: [], sessions: [] });
+  assert.equal(main(tree).children[0].props.open, true);
+  assert.equal(history(tree).children[0].length, 0);
+  main(tree).props.onClick();
+  tree = render({ root: "/empty", roots: [], sessions: [] });
+  assert.equal(main(tree).children[0].props.open, false);
 });
 
 test("selected history threads remain visible within the current page size", () => {

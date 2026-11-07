@@ -243,10 +243,14 @@ function SidebarMoreMenu({ label, children }: { label: string; children: ReactNo
   );
 }
 
-function FolderIcon({ size }: { size: number }): ReactNode {
+function FolderIcon({ size, open = false }: { size: number; open?: boolean }): ReactNode {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+      {open ? (
+        <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />
+      ) : (
+        <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+      )}
     </svg>
   );
 }
@@ -615,6 +619,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [projectsOpen, setProjectsOpen] = useState(true);
   const [allProjectsVisible, setAllProjectsVisible] = useState(false);
   const [projectVisibleCounts, setProjectVisibleCounts] = useState<Record<string, number>>({});
+  const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({});
   const [projectFolders, setProjectFolders] = useState<string[]>([]);
   const [hiddenProjectFolders, setHiddenProjectFolders] = useState<string[]>(() => loadHiddenProjectFolders());
   const [pins, setPins] = useState<SidebarPin[]>([]);
@@ -1167,13 +1172,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         }
       }
       for (const group of groups) {
+        if (collapsedProjects[group.root]) continue;
         const roots = visibleThreadRoots(group, projectVisibleCounts[group.root] ?? 5, selectedSessionId);
         for (const id of threadTitleIds(roots)) ids.add(id);
       }
     }
     return allSessions.filter((session) => ids.has(session.id) && !session.titleLoaded)
       .map(({ id, modified }) => ({ id, modified }));
-  }, [allSessions, normalizedSessionSearch, projectsOpen, visibleProjectGroups, pinsOpen, visiblePins, projectGroups, projectVisibleCounts, selectedSessionId]));
+  }, [allSessions, normalizedSessionSearch, projectsOpen, visibleProjectGroups, pinsOpen, visiblePins, projectGroups, projectVisibleCounts, collapsedProjects, selectedSessionId]));
 
   useEffect(() => {
     const requested = JSON.parse(titleRequestKey) as { id: string; modified: string }[];
@@ -1221,6 +1227,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   function renderProjectGroup(group: { root: string; sessions: SessionInfo[]; roots: SessionTreeNode[] }) {
     const roots = group.roots;
+    const isCollapsed = collapsedProjects[group.root] ?? false;
     const visibleCount = projectVisibleCounts[group.root] ?? 5;
     const hasMore = roots.length > visibleCount;
     const visibleRoots = visibleThreadRoots(group, visibleCount, selectedSessionId);
@@ -1231,8 +1238,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     return (
       <section className="project-section" key={group.root}>
         <div className={`project-row${isActive ? " is-active" : ""}`}>
-          <button type="button" className="project-row-main" onClick={() => { setSelectedCwd(group.root); setHighlightedProjectRoot(null); }} aria-current={isActive ? "true" : undefined}>
-            <FolderIcon size={16} />
+          <button type="button" className="project-row-main" onClick={() => {
+            setCollapsedProjects((previous) => ({ ...previous, [group.root]: !isCollapsed }));
+            setProjectVisibleCounts((previous) => ({ ...previous, [group.root]: 5 }));
+          }} aria-expanded={!isCollapsed} aria-current={isActive ? "true" : undefined}>
+            <FolderIcon size={16} open={!isCollapsed} />
             <span className="project-row-label">{label}</span>
             {isPinned && <svg className="project-pin-indicator" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-label="Pinned"><path d="m14 4 6 6-4 1-4 4-1 5-3-3-3-3 5-1 4-4Z" /></svg>}
           </button>
@@ -1254,7 +1264,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
           </button>
         </div>
-        <div className="project-sessions">
+        {!isCollapsed && <div className="project-sessions">
           {visibleRoots.map((node) => (
             <SessionTreeItem
               key={node.session.id}
@@ -1271,15 +1281,15 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               depth={0}
             />
           ))}
-          {roots.length > 5 && (
+          {hasMore && (
             <button type="button" className="project-show-more" onClick={() => setProjectVisibleCounts((previous) => ({
               ...previous,
-              [group.root]: hasMore ? (previous[group.root] ?? 5) + 10 : 5,
+              [group.root]: (previous[group.root] ?? 5) + 10,
             }))}>
-              {hasMore ? "Show more" : "Show less"}
+              Show more
             </button>
           )}
-        </div>
+        </div>}
       </section>
     );
   }
