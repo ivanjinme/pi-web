@@ -17,10 +17,10 @@
 
 ## 当前停点与授权
 
-- 发布链实现已收尾，下一步是真实打包升级验收。具体未验证边界见阶段文档，不能宣称已验证安装版。
-- 本次用户只要求交接文档，**不是新增打包、安装、提交、上传或切换 Latest 的授权**。
-- 真实验收的 baseline／目标版本、安装位置、端口及数据备份／恢复安排尚未确定。不要预先承诺只需一个安装包。
-- 正式 setup 已执行，签名预检通过；**用户尚未确认完成私钥的独立安全备份**。路径与恢复规则引用 `docs/desktop-release.md`，不要读取或复述私钥内容。
+- A（0.1.11）安装与同版本 shell 重开冒烟已通过；真实 A→B 升级尚未完成，不能将两者混称验收通过。
+- 用户已明确批准所有改动 commit／push，并在后续要求 **npm 与桌面两边 publish，然后继续升级验收**；私钥独立备份已确认完成。原始 handoff 的“仅文档、无发布授权”已被后续授权取代。
+- A=0.1.11；本轮 B 与 npm 目标均为 0.1.12。安装目录、独立 profile、端口及仓库外备份见后文；不停止承载 agent 的 8888 开发服务。
+- 正式 setup 已执行，签名预检通过。密钥路径与恢复规则引用 `docs/desktop-release.md`，不要读取或复述私钥内容。
 - GitHub 测试资产的历史与证据引用阶段 1 文档；删除、覆盖或改为 Latest 需另获授权。
 
 ## 对话中需要保留的协作上下文
@@ -61,4 +61,4 @@ node --test electron/updates.integration.test.mjs electron/updates-install-servi
 - **A 安装版冒烟通过**：真实运行在 8890，正式公钥配置匹配，三个 preload API 可用，`/api/sessions` 返回 200 和 406 个会话，一份历史会话 SHA256 与备份一致。正常关窗后自有 8890 服务退出；清除端口环境变量后，经 Windows `Shell.Application.ShellExecute` 调用安装器保留的开始菜单快捷方式并传入 `--updated`，仍恢复 8890 和独立 profile，localStorage 验收标记保留。这是同版本 shell 重开演练，**不是真实 A→B NSIS 升级验收**。
 - A 最终已正常关闭；8890／9227 已释放，原 8888 开发服务（PID 16520）和 8899 fixture 保持运行。新建的开始菜单与桌面快捷方式仅保留 `--user-data-dir=<独立 profile>`，已移除远程调试参数。后续自动化升级若要连接 9227，须在受控验收期间重新加入调试参数，结束后移除。
 - 安装版证据：`smoke-A-browser.json`、`smoke-A-installed.json`、`relaunch-A-browser.json`、`shell-relaunch-process.json`、`A-installed.png`、`A-shell-relaunch.png`，均位于 `build/desktop/update-acceptance/`。B 构建、源码提交、上传和切换 Latest 尚未执行。
-- 发布前仍须解决源码归档：发布规程要求 tag commit 对应安装包源码，但工作区包含未提交更新代码及并行 UI 改动。用户当前批准的操作没有明确授权提交这些并行改动；不得把实际安装包挂到不匹配的旧 HEAD，也不得顺带整体暂存／提交。
+- 上轮停止时的源码归档阻塞现已解除：用户批准全部改动 commit／push，源码已在 `e1267b7`（main 与 origin/main）及之前的 composer/sidebar commits 中。本轮发布前重新检查工作区；B 的 npm 与桌面标签须对应其实际 0.1.12 源码 commit，不得把安装包挂到不匹配的旧 HEAD。
