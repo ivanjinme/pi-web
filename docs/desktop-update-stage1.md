@@ -114,8 +114,9 @@ plaintext artifacts must never be used for installation or production clients.
 The GitHub prerelease/assets remain available for inspection; no automatic cleanup
 or release deletion was performed.
 
-**Remaining unverified:** freshly packaged-app startup/dependency assembly,
-installation/upgrade, and real differential updating with matching blockmaps.
-Resource mappings have automated coverage, not a packaged-app acceptance run.
-The local real-EXE download and GitHub tiny-fixture download validate different
-boundaries; together they do not prove that an installed app can update itself.
+**Unverified at the end of stage 1:** freshly packaged-app startup/dependency
+assembly, installation/upgrade, and real differential updating with matching
+blockmaps. The two stage-1 download checks alone do not prove that an installed
+app can update itself. Subsequent real installed **0.1.11 → 0.1.12** core upgrade
+acceptance is recorded in `desktop-update-stage2.md`; successful differential
+transfer remains unverified.

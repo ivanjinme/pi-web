@@ -17,9 +17,9 @@
 
 ## 当前停点与授权
 
-- A（0.1.11）安装与同版本 shell 重开冒烟已通过；真实 A→B 升级尚未完成，不能将两者混称验收通过。
+- npm 与桌面 **0.1.12 已发布**，桌面为正式 Latest。真实安装版 **0.1.11 → 0.1.12 核心升级验收通过**；成功差异传输未验证，具体证据与限制见下方最新记录及阶段 2 文档。
 - 用户已明确批准所有改动 commit／push，并在后续要求 **npm 与桌面两边 publish，然后继续升级验收**；私钥独立备份已确认完成。原始 handoff 的“仅文档、无发布授权”已被后续授权取代。
-- A=0.1.11；本轮 B 与 npm 目标均为 0.1.12。安装目录、独立 profile、端口及仓库外备份见后文；不停止承载 agent 的 8888 开发服务。
+- A=0.1.11，已安装 B=0.1.12；npm 与桌面标签均指向源码 `271a02e`。测试窗口已正常关闭，8890／9227 已释放；8888 开发服务和 8899 fixture 保持运行。安装目录、独立 profile 及仓库外备份见后文。首次发布前的“未分发”结论不适用于未来发布。
 - 正式 setup 已执行，签名预检通过。密钥路径与恢复规则引用 `docs/desktop-release.md`，不要读取或复述私钥内容。
 - GitHub 测试资产的历史与证据引用阶段 1 文档；删除、覆盖或改为 Latest 需另获授权。
 
@@ -32,11 +32,11 @@
   - `D:/ivanj/Documents/0-1/2_product/playground/deepseek-harness/apps/desktop/src/update-coordinator.ts`
   - `D:/ivanj/Documents/0-1/2_product/playground/deepseek-harness/apps/desktop/src/main.ts`
   不要把参考项目的全部机制当成本项目需求。
-- 工作区混有并行任务改动，尤其 composer/sidebar 相关内容。不要清理、撤回、顺带重构或整体暂存无关改动；以续作时的 diff 为准。
+- 续作时可能混有并行任务改动，尤其 composer/sidebar 相关内容。不要清理、撤回、顺带重构或整体暂存无关改动；以当时的 diff 为准。
 
-## 最新验证补充
+## 历史自动验证入口
 
-已有阶段验证记录直接引用阶段文档。发布链最后一轮另外通过了 **67 项针对性测试**、TypeScript、lint 和复审；这不是一次最新全量测试，也不要与历史数量相加冒称全量通过。
+已有阶段验证记录直接引用阶段文档。原发布链接入最后一轮另外通过了 **67 项针对性测试**、TypeScript、lint 和复审；这不是最新全量测试，也不要与其他历史数量相加冒称全量通过。
 
 若要复核这一轮，入口是：
 
@@ -56,9 +56,21 @@ node --test electron/updates.integration.test.mjs electron/updates-install-servi
 - 本轮 31 项端口／导航／主进程针对性测试和相关文件 lint 通过，独立复审无发现。发布脚本另跑的 162 项 Electron 测试通过；数量不相加冒称全量。
 - 用户数据已作仓库外、本用户 ACL 保护的在线备份：`C:/Users/ivanj/.weclio-backups/desktop-upgrade-2026-11-07T11-43-21-499Z/`，851 文件、841817833 字节。清单记录 14 个跳过项（私钥目录、缓存、锁及开发窗口占用的 Cookie）；不是完整冷备。私钥由用户另行备份，不读取或复制至验收目录。
 - 验收保留现有 8888 开发服务和 8899 fixture，安装版使用 8890。独立 Chromium profile 计划为 `%APPDATA%/Weclio-update-acceptance`；真实 Electron 已验证 `--user-data-dir` 对此路径生效。NSIS 用于重开的开始菜单快捷方式也必须保留此参数，不能假设安装器继承进程环境或启动参数。
-- A 版本当前为 0.1.11（package 与 lock 已更新）；生产构建和 TypeScript 通过，未改开发 `.next/`。首次 NSIS 打包在追加 elevate.exe 的 7za 子进程启动时以 3221225794 失败，无新包保留。相同参数的微型压缩检查 3 次通过；原生产构建的 `--quick` 重试已成功，不重跑 Web 构建。A 安装包 389291078 字节，SHA256 为 `52e22dfaa740ec78d1c092152c666cb74f832a898f298145a0a50bfd324d2618`，四件产物单独保留在 `build/desktop/update-acceptance/A/`。结果和进程信息见忽略目录 `build/desktop/update-acceptance/`。不要仅凭历史 PID 停进程。
+- A baseline 所用版本为 0.1.11；该轮生产构建和 TypeScript 通过，未改开发 `.next/`。首次 NSIS 打包在追加 elevate.exe 的 7za 子进程启动时以 3221225794 失败，无新包保留。相同参数的微型压缩检查 3 次通过；原生产构建的 `--quick` 重试已成功，不重跑 Web 构建。A 安装包 389291078 字节，SHA256 为 `52e22dfaa740ec78d1c092152c666cb74f832a898f298145a0a50bfd324d2618`，四件产物单独保留在 `build/desktop/update-acceptance/A/`。结果和进程信息见忽略目录 `build/desktop/update-acceptance/`。不要仅凭历史 PID 停进程。
 - A 首次静默安装因 8 分钟等待上限被中断；随后误启动了尚未解压完整的应用，缺 cross-spawn，不能判作完整安装版的产品缺陷。该测试窗口已定向正常关闭，未停开发服务。同一安装包的无短超时补装已完成，exitCode 0，耗时约 10 分钟；状态见 `install-A-result.json`，不可仅凭 EXE 已出现就启动。安装目录为 `%LOCALAPPDATA%/Programs/Weclio`。
 - **A 安装版冒烟通过**：真实运行在 8890，正式公钥配置匹配，三个 preload API 可用，`/api/sessions` 返回 200 和 406 个会话，一份历史会话 SHA256 与备份一致。正常关窗后自有 8890 服务退出；清除端口环境变量后，经 Windows `Shell.Application.ShellExecute` 调用安装器保留的开始菜单快捷方式并传入 `--updated`，仍恢复 8890 和独立 profile，localStorage 验收标记保留。这是同版本 shell 重开演练，**不是真实 A→B NSIS 升级验收**。
 - A 最终已正常关闭；8890／9227 已释放，原 8888 开发服务（PID 16520）和 8899 fixture 保持运行。新建的开始菜单与桌面快捷方式仅保留 `--user-data-dir=<独立 profile>`，已移除远程调试参数。后续自动化升级若要连接 9227，须在受控验收期间重新加入调试参数，结束后移除。
-- 安装版证据：`smoke-A-browser.json`、`smoke-A-installed.json`、`relaunch-A-browser.json`、`shell-relaunch-process.json`、`A-installed.png`、`A-shell-relaunch.png`，均位于 `build/desktop/update-acceptance/`。B 构建、源码提交、上传和切换 Latest 尚未执行。
-- 上轮停止时的源码归档阻塞现已解除：用户批准全部改动 commit／push，源码已在 `e1267b7`（main 与 origin/main）及之前的 composer/sidebar commits 中。本轮发布前重新检查工作区；B 的 npm 与桌面标签须对应其实际 0.1.12 源码 commit，不得把安装包挂到不匹配的旧 HEAD。
+- 安装版证据：`smoke-A-browser.json`、`smoke-A-installed.json`、`relaunch-A-browser.json`、`shell-relaunch-process.json`、`A-installed.png`、`A-shell-relaunch.png`，均位于 `build/desktop/update-acceptance/`。截至该轮 A 冒烟停点，B 构建／发布尚未执行；后续完成记录如下。
+- 上轮停止时的源码归档阻塞随后解除：用户批准全部改动 commit／push，源码进入 `e1267b7` 及之前的 composer/sidebar commits；本轮再提交版本 0.1.12，对应发布源码如下。
+
+## 2026-11-07 UTC：两边发布与真实 A→B 验收完成
+
+- **发布**：源码 `271a02ec2fcdad62fa911c17fe583301971603e1`；npm 标签 `v0.1.12`，GitHub Actions run `42402925754` 成功，官方 registry 的 `latest`、版本和 gitHead 已核对。桌面标签 `desktop-v0.1.12` 指向同一 commit，正式公开、非 prerelease、Latest。草稿及公开后的四件附件哈希均已核对，公开 Latest 清单验签通过；未覆盖历史资产或修改 smoke release。
+- **B 产物**：EXE 389502062 字节，SHA256 `9d815c54452db73204d22793e4f297e1a879334e8177643fb33b2977ccafef39`；配套 blockmap、签名清单和 SHA256SUMS 均保留在 `build/desktop/dist/`。B 发布脚本的 167 项 Electron 测试、生产构建和 TypeScript 通过；数量不与前轮相加。
+- **真实升级**：没有先手装 B 再恢复 A。已安装 A 从正式 Latest 下载 B，独立核对 SHA512／大小；下载就绪后的普通退出不安装、取消原生确认不停止服务，均通过。再次明确确认后，标准 updater 以 `--updated /S --force-run` 启动真实 NSIS 安装器；B 于 19:47:04 UTC 自动重开，应用及服务版本均为 0.1.12，仍使用 8890 和同一独立 profile。
+- **自动重开证据与监测限制**：自动进程 PID 28292 的 `--updated` 命令行、创建时间、原生渲染 UI、安装元数据和新自有服务共同证明自动重开。CDP 观测脚本未能在自动重开后重新连接，`upgrade-observation-result.json` 的 timeout／false 保留，不能改写为自动监测通过。取得上述独立证据后，才正常关闭并手动重开同版本 B 作 CDP 诊断；该次截图和浏览器标记检查不冒充自动重开证据。
+- **数据**：升级前 407 个会话 ID 全部保留；设置／模型配置、历史会话、测试文件、端口等六个抽样文件的哈希保持一致。浏览器 localStorage 标记在后续同版本诊断重开中保留；B updater 对相同 Latest 版本保持 idle。此结论是抽样文件完整性和会话成员集合，不是所有会话正文逐字或所有功能验收。
+- **差分**：A 未发布，旧 blockmap 请求 404 后正常回退全量；本轮未证明成功差异传输。B 的配对 blockmap 已公开，NSIS 当前 installer.exe 缓存与 B 安装包哈希一致。等下次真实版本观察即可，不为此立即打 C。
+- **收尾**：B 已保持安装，测试窗口正常关闭；8890／9227 释放，原 8888 开发服务（历史 PID 16520）与 8899 fixture 未动。新建快捷方式保留独立 profile 参数，远程调试参数已移除；用户原 Electron profile 未被测试实例打开。下一次操作必须重新核实进程身份，不能拿此处历史 PID 直接 kill。
+- **证据入口**（均在忽略目录 `build/desktop/update-acceptance/`）：`upgrade-core-verified.json` 汇总；`automatic-B-ui-ready.json`、`installed-B-version.json`、`installer-handoff-processes.json` 为自动链路；`data-before-B.json`／`data-after-B.json` 为数据快照；`B-manual-diagnostic-restart.json` 和对应截图为后续诊断。`release-B-remote.json`／`desktop-release-final-state.json` 为公开状态，`release-B-draft-assets-verified.json` 保留草稿验收；另有 npm、公开清单及最终运行状态回执。独立只读复核支持附有限定的核心验收结论。
+- **后续边界**：当前核心目标完成；忙任务竞态、beforeunload 与安装失败分支并未全部在安装版重跑，仍分别引用已有自动／空白窗口测试。不新增回滚或退出后恢复承诺。以后公开发布可能已有客户端，需重新确认影响范围，不复用此次“无其他客户端”的历史前提。
