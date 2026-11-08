@@ -58,7 +58,8 @@ for (const fail of [false, true]) {
       dialog: { async showMessageBox(...args) {
         const options = args.at(-1);
         if (options.type === "error") errorShown();
-        return { response: options.type === "question" ? 1 : 0 };
+        assert.notEqual(options.type, "question", "restart click must not require another confirmation");
+        return { response: 0 };
       } },
       restoreWindow: async () => { restored++; }, log() {},
     });

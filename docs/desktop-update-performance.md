@@ -5,7 +5,7 @@
 Keep Next and the external system Node/npm requirement. Do not migrate to Vite or
 Electron's embedded Node in this work. Public desktop B 0.1.12 remains unchanged.
 
-The target is **at most 30 seconds from explicit restart confirmation to a usable
+The target is **at most 30 seconds from the explicit restart-update click to a usable
 new desktop**, for a fully prepared ordinary application update and an idle task
 gate. Downloads, preparation and user decision time are outside that window, but
 preparation progress must be visible and the old version must remain usable.
@@ -116,8 +116,8 @@ Evidence: ignored
 2. Implement bounded download/extraction and production-reviewed member/link/path
    validation, cancellation, verified preparation receipts and visible preparation
    progress. Do not expose a restart-ready action before preparation is complete.
-3. Integrate explicit apply with existing managed-task admission, confirmation
-   and real window-close/veto rules. Confirm owned server exit; commit selection
+3. Integrate explicit apply with existing managed-task admission, the explicit
+   restart click (without a redundant confirmation), and real window-close/veto rules. Confirm owned server exit; commit selection
    without copying/deleting old trees in the outage. Preserve port/profile.
 4. Define startup-failure recovery/previous-program selection and data migration
    compatibility without claiming arbitrary data rollback. Normal exit must never

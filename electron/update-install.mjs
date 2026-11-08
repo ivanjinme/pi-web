@@ -27,8 +27,8 @@ export function createUpdateInstaller({ app, getService, getWindow, getGate, dia
   let disposed = false;
   let language;
 
-  async function message(type, zh, en, buttons) {
-    const options = { type, title: language === "zh-CN" ? "Weclio 更新" : "Weclio update", message: language === "zh-CN" ? zh : en, buttons: buttons ?? [language === "zh-CN" ? "知道了" : "Got it"], defaultId: 0, cancelId: 0 };
+  async function message(type, zh, en) {
+    const options = { type, title: language === "zh-CN" ? "Weclio 更新" : "Weclio update", message: language === "zh-CN" ? zh : en, buttons: [language === "zh-CN" ? "知道了" : "Got it"], defaultId: 0, cancelId: 0 };
     const window = getWindow();
     return window && !window.isDestroyed() ? dialog.showMessageBox(window, options) : dialog.showMessageBox(options);
   }
@@ -70,8 +70,8 @@ export function createUpdateInstaller({ app, getService, getWindow, getGate, dia
       if (!current) throw new Error("Desktop task gate unavailable");
       const warnBusy = () => message("warning", "有任务正在运行，请结束任务后再更新。", "Tasks are running. Finish them before updating.");
       if (await current.inspect() === "busy") { await warnBusy(); phase = "idle"; return; }
-      const response = await message("question", "更新将关闭并重新打开应用，请确认修改已保存。", "The update will close and reopen the app. Make sure your changes are saved.", locale === "zh-CN" ? ["取消", "重启更新"] : ["Cancel", "Restart to update"]);
-      if (response.response !== 1 || disposed) { phase = "idle"; return; }
+      // 点击“重启更新”本身即明确授权；不再重复询问，仍保留锁定与关闭拦截。
+      if (disposed) return;
       gate = current;
       if (await current.lock() === "busy") {
         await unlock();

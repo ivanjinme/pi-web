@@ -17,11 +17,12 @@ be conflated with the original test-only evidence.
 1. Only a packaged app with a downloaded, explicitly installable signed update
    can enter installation. Development remains a download-only preview.
 2. Inspect all application-managed tasks on click. Busy means a localized warning
-   and no confirmation/installation; there is no force-stop option or polling.
-3. Ask the user to save changes and confirm restart. Cancellation does not lock
-   tasks or stop services.
-4. Atomically recheck and lock new task admissions. A task started during the
-   confirmation blocks this attempt. Recheck the downloaded SHA512 and size.
+   and no installation; there is no force-stop option or polling.
+3. The explicit **Restart to update** button is the user's authorization. Do not
+   show a redundant confirmation dialog. Disposal while inspection is pending
+   cancels before acquiring a task lock.
+4. Atomically recheck and lock new task admissions. A task started after the
+   initial inspection blocks this attempt. Recheck the downloaded SHA512 and size.
 5. Ask the existing window to close normally. A `beforeunload` veto or prevented
    close cancels the update and unlocks tasks without stopping the server.
 6. Only after the actual `closed` event, hand off to standard
@@ -88,6 +89,11 @@ boundaries were subsequently exercised below. Successful differential transfer
 remains unverified; published sidecars alone do not prove it.
 
 ## Packaged acceptance — 2026-11-07 UTC
+
+This historical 0.1.11 → 0.1.12 run used a second native confirmation dialog.
+Current source removes that fixed dialog; the explicit restart click remains
+required, and task checks, artifact verification and normal-close vetoes remain.
+The published 0.1.12 package has not been replaced.
 
 - Baseline A was the installed **0.1.11**. Target B was **0.1.12**, built from
   commit `271a02ec2fcdad62fa911c17fe583301971603e1`. npm `v0.1.12` and desktop

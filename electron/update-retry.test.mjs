@@ -124,7 +124,8 @@ test("upstream install retries after async launch error, vetoes failed scheduled
     dialog: { async showMessageBox(...args) {
       const options = args.at(-1);
       if (options.type === "error") errorShown.resolve();
-      return { response: options.type === "question" ? 1 : 0 };
+      assert.notEqual(options.type, "question", "restart click must not require another confirmation");
+      return { response: 0 };
     } },
     async restoreWindow() { restored += 1; window = fakeWindow(); },
     log() {},

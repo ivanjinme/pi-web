@@ -38,7 +38,7 @@ class FakeWindow extends EventEmitter {
   }
 }
 
-function fixture({ packaged = true, canInstall = true, mode, inspect = "ready", lock = "ready", confirm, verify, install, missingGate = false } = {}) {
+function fixture({ packaged = true, canInstall = true, mode, inspect = "ready", lock = "ready", verify, install, missingGate = false } = {}) {
   const events = [];
   const dialogs = [];
   const logs = [];
@@ -48,11 +48,12 @@ function fixture({ packaged = true, canInstall = true, mode, inspect = "ready", 
   let installed = 0;
   let restored = 0;
   const errorShown = deferred();
-  const questionShown = deferred();
+  const inspectStarted = deferred();
+  const lockStarted = deferred();
   const verifyStarted = deferred();
   const gate = {
-    async inspect() { events.push("inspect"); return typeof inspect === "function" ? inspect() : inspect; },
-    async lock() { events.push("lock"); return typeof lock === "function" ? lock() : lock; },
+    async inspect() { events.push("inspect"); inspectStarted.resolve(); return typeof inspect === "function" ? inspect() : inspect; },
+    async lock() { events.push("lock"); lockStarted.resolve(); return typeof lock === "function" ? lock() : lock; },
     async unlock() { events.push("unlock"); },
   };
   const service = {
@@ -80,10 +81,6 @@ function fixture({ packaged = true, canInstall = true, mode, inspect = "ready", 
         dialogs.push(options);
         events.push(`dialog:${options.type}`);
         if (options.type === "error") errorShown.resolve();
-        if (options.type === "question") {
-          questionShown.resolve();
-          return confirm ? confirm() : { response: 1 };
-        }
         return { response: 0 };
       },
     },
@@ -95,7 +92,7 @@ function fixture({ packaged = true, canInstall = true, mode, inspect = "ready", 
     log: (...args) => logs.push(args),
   });
   return {
-    installer, events, dialogs, logs, window, errorShown, questionShown, verifyStarted,
+    installer, events, dialogs, logs, window, errorShown, inspectStarted, lockStarted, verifyStarted,
     get installed() { return installed; },
     get restored() { return restored; },
     get currentWindow() { return currentWindow; },
@@ -118,7 +115,8 @@ function assertPreserved(h) {
 test("production ready handoff uses only the injected stock updater integration point", async () => {
   const h = fixture();
   await h.installer.restart("en");
-  assert.deepEqual(h.events, ["canInstall", "inspect", "dialog:question", "lock", "verify", "close", "closed", "subscribe", "quitAndInstall"]);
+  assert.deepEqual(h.events, ["canInstall", "inspect", "lock", "verify", "close", "closed", "subscribe", "quitAndInstall"]);
+  assert.deepEqual(h.dialogs, [], "explicit restart click must not ask for confirmation again");
   assert.equal(h.installed, 1);
   assert.equal(h.installer.isClosing(), true);
   assertWindowListenersClean(h.window);
@@ -142,7 +140,7 @@ test("a close request alone never installs; only the actual closed event allows 
   h.installer.dispose();
 });
 
-test("busy inspection warns before confirmation without locking or polling", async () => {
+test("busy inspection warns without locking, closing, or polling", async () => {
   const h = fixture({ inspect: "busy" });
   await h.installer.restart("en");
   await nextTurn();
@@ -151,19 +149,22 @@ test("busy inspection warns before confirmation without locking or polling", asy
   assert.equal(h.installer.isClosing(), false);
 });
 
-test("tasks becoming busy after confirmation release the lock and never verify or close", async () => {
+test("tasks becoming busy after inspection release the lock and never verify or close", async () => {
   const h = fixture({ lock: "busy" });
   await h.installer.restart("en");
-  assert.deepEqual(h.events, ["canInstall", "inspect", "dialog:question", "lock", "unlock", "dialog:warning"]);
+  assert.deepEqual(h.events, ["canInstall", "inspect", "lock", "unlock", "dialog:warning"]);
   assertPreserved(h);
 });
 
-test("cancelled confirmation does not acquire the gate", async () => {
-  const h = fixture({ confirm: async () => ({ response: 0 }) });
+test("Chinese restart click also hands off without a second confirmation", async () => {
+  const h = fixture();
   await h.installer.restart("zh-CN");
-  assert.deepEqual(h.events, ["canInstall", "inspect", "dialog:question"]);
-  assert.deepEqual(h.dialogs[0].buttons, ["取消", "重启更新"]);
-  assertPreserved(h);
+  assert.deepEqual(h.dialogs, []);
+  assert.equal(h.installed, 1);
+  assert.ok(h.events.indexOf("lock") < h.events.indexOf("verify"));
+  assert.ok(h.events.indexOf("verify") < h.events.indexOf("close"));
+  assert.ok(h.events.indexOf("closed") < h.events.indexOf("quitAndInstall"));
+  h.installer.dispose();
 });
 
 for (const mode of ["veto", "prevented"]) {
@@ -235,7 +236,7 @@ test("failed verification preserves the window and releases the gate", async () 
   assert.equal(h.dialogs.at(-1).type, "error");
 });
 
-test("missing task gate fails closed before asking to restart", async () => {
+test("missing task gate fails closed before verification or window closure", async () => {
   const h = fixture({ missingGate: true });
   await h.installer.restart("en");
   assertPreserved(h);
@@ -253,14 +254,18 @@ for (const options of [{ packaged: false, canInstall: true }, { packaged: true, 
   });
 }
 
-test("repeat clicks are serialized during confirmation, verification, closing, and handoff", async () => {
-  const confirm = deferred();
+test("repeat clicks are serialized during inspection, locking, verification, closing, and handoff", async () => {
+  const inspect = deferred();
+  const lock = deferred();
   const verify = deferred();
-  const h = fixture({ mode: "pending", confirm: () => confirm.promise, verify: () => verify.promise });
+  const h = fixture({ mode: "pending", inspect: () => inspect.promise, lock: () => lock.promise, verify: () => verify.promise });
   const restart = h.installer.restart("en");
-  await h.questionShown.promise;
+  await h.inspectStarted.promise;
   await h.installer.restart("zh-CN");
-  confirm.resolve({ response: 1 });
+  inspect.resolve("ready");
+  await h.lockStarted.promise;
+  await h.installer.restart("zh-CN");
+  lock.resolve("ready");
   await h.verifyStarted.promise;
   await h.installer.restart("zh-CN");
   verify.resolve();
@@ -275,22 +280,21 @@ test("repeat clicks are serialized during confirmation, verification, closing, a
   assert.equal(h.events.filter((event) => event === "inspect").length, 1);
   assert.equal(h.events.filter((event) => event === "lock").length, 1);
   assert.equal(h.events.filter((event) => event === "verify").length, 1);
-  assert.equal(h.dialogs.length, 1);
-  assert.equal(h.dialogs[0].title, "Weclio update");
+  assert.deepEqual(h.dialogs, []);
   h.installer.dispose();
 });
 
-test("dispose during confirmation cancels without acquiring a lock or installing", async () => {
-  const confirm = deferred();
-  const h = fixture({ confirm: () => confirm.promise });
+test("dispose during inspection cancels without acquiring a lock or installing", async () => {
+  const inspect = deferred();
+  const h = fixture({ inspect: () => inspect.promise });
   const restart = h.installer.restart("en");
-  await h.questionShown.promise;
+  await h.inspectStarted.promise;
   h.installer.dispose();
-  confirm.resolve({ response: 1 });
+  inspect.resolve("ready");
   await restart;
   await h.installer.restart("en");
   assertPreserved(h);
-  assert.deepEqual(h.events, ["canInstall", "inspect", "dialog:question"]);
+  assert.deepEqual(h.events, ["canInstall", "inspect"]);
 });
 
 test("dispose during verification cancels installation and releases the acquired gate", async () => {
