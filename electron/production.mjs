@@ -6,6 +6,7 @@ import nodeVersion from "../bin/node-version.js";
 import { createRuntimeEnvironment } from "./runtime.mjs";
 import { assertPortAvailable, waitForServer } from "./server.mjs";
 import { createUpdateGate } from "./update-gate.mjs";
+import { resolveDesktopTools } from "./toolsets.mjs";
 
 export function resolveSystemNode(env = process.env) {
   const options = { env, encoding: "utf8", windowsHide: true, timeout: 10_000 };
@@ -21,10 +22,15 @@ export function resolveSystemNode(env = process.env) {
   return node.executable;
 }
 
-export async function startProductionServer({ resourcesPath, logsPath, url, onUnexpectedExit, signal }) {
+export async function startProductionServer({ resourcesPath, logsPath, url, onUnexpectedExit, signal, toolsetsRoot, toolsetsBase, onToolProgress }) {
   const root = join(resourcesPath, "server");
   if (!existsSync(join(root, ".next", "BUILD_ID"))) throw new Error("安装包缺少 Web 生产构建，请重新安装 Weclio。");
-  const runtime = join(resourcesPath, "runtime", "win-x64");
+  signal?.throwIfAborted();
+  const address = new URL(url);
+  const port = Number(address.port || 80);
+  // 先检查冲突，避免准备完工具后才发现不能启动；不接管已有服务。
+  await assertPortAvailable(port);
+  const runtime = await resolveDesktopTools({ resourcesPath, storeRoot: toolsetsRoot, storeBase: toolsetsBase, signal, onProgress: onToolProgress });
   for (const file of ["git/bin/bash.exe", "git/cmd/git.exe", "tools/rg.exe", "tools/fd.exe"]) {
     if (!existsSync(join(runtime, file))) throw new Error(`安装包缺少运行工具: ${file}`);
   }
@@ -34,9 +40,6 @@ export async function startProductionServer({ resourcesPath, logsPath, url, onUn
     if (key === "TURBOPACK" || key === "NEXT_RUNTIME" || key.startsWith("__NEXT_")) delete env[key];
   }
   const node = resolveSystemNode(env);
-  const address = new URL(url);
-  const port = Number(address.port || 80);
-  await assertPortAvailable(port);
   mkdirSync(logsPath, { recursive: true });
   const logFile = join(logsPath, "server.log");
   const record = (chunk) => {

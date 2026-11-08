@@ -3,6 +3,8 @@
 npm 与桌面 0.1.12 均已发布；桌面为正式 Latest。真实安装版 0.1.11 → 0.1.12 的下载、明确确认、NSIS 升级、自动重开与抽样数据保留已验证。成功差异下载尚未验证；证据与限制见 `desktop-update-stage2.md` 和 `desktop-update-handoff.md`。
 桌面发布与 npm 发布分开，使用 `desktop-v<版本>` 标签，不使用会触发 npm workflow 的 `v*` 标签。
 
+当前工作区另有尚未发布的安装性能改进。新构建会过滤部署追踪清单／源码映射，并生成独立工具描述，供首装迁移和后续缓存复用；bootstrap 安装器仍包含工具源。这不等于现有 NSIS 已变成快速增量安装。普通业务包的新更新通道尚未接入，阶段结果与发布前缺口见 `desktop-update-performance.md`。
+
 ## 密钥与信任配置
 
 - 仓库中的 `resources/desktop-update.json` 只包含正式更新地址、公钥和缓存目录名，可随代码提交并打包。
@@ -38,6 +40,8 @@ npm run release:desktop -- --quick
 ```
 
 脚本会预检版本、私钥与公钥，运行 Electron 测试，在 `build/desktop/server/` 构建服务并生成 NSIS 安装包，不改开发 `.next/`。`--quick` 只省略未变化的服务构建，**仍会打包安装器**；版本或依赖变更通常需要完整构建。
+
+构建还生成 `build/desktop/toolset.json`：工具清单及内容摘要，随 bootstrap 安装器放为 `resources/desktop-toolset.json`；不是供用户另外下载的附件。首次启动复制并验证工具到安装目录外的本用户 toolsets，缓存命中只检查完成凭据和关键二进制，不联网检查 Git 新版本。显式工具内容变更产生新的工具 ID，不以每次业务版本号强制重装。
 
 输出到 `build/desktop/dist/`：
 

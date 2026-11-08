@@ -15,6 +15,7 @@
     "electron/update-gate.mjs",
     "electron/production.mjs",
     "electron/runtime.mjs",
+    "electron/toolsets.mjs",
     "electron/server.mjs",
     "bin/node-version.js",
     "LICENSE",
@@ -33,11 +34,15 @@
     {
       "from": "build/desktop/server",
       "to": "server",
-      "filter": ["package.json", "next.config.js", "desktop-packages.mjs", "LICENSE", "public/**/*", ".next/**/*", "!.next/cache/**/*"]
+      "filter": ["package.json", "next.config.js", "desktop-packages.mjs", "LICENSE", "public/**/*", ".next/**/*", "!.next/cache/**/*", "!.next/**/*.nft.json", "!.next/**/*.js.map", "!.next/**/*.mjs.map", "!.next/**/*.cjs.map", "!.next/trace", "!.next/trace-build"]
     },
     {
       "from": "build/desktop/server/node_modules",
       "to": "server/node_modules"
+    },
+    {
+      "from": "build/desktop/toolset.json",
+      "to": "desktop-toolset.json"
     },
     {
       "from": "resources/runtime/win-x64",

@@ -17,6 +17,8 @@
 
 ## 当前停点与授权
 
+- **最新实现停点**：依赖／Next 部署元数据瘦身和独立工具存储已写入代码；未打包或发布。隔离原型证明后台准备期间旧服务可用，停止到页面及会话 API 恢复约 4.45 秒。正式业务包更新通道、不同版本 Electron 重开和 VM 验收仍未完成，不能说“30 秒更新已交付”；完整结果与后续边界见 `docs/desktop-update-performance.md`。
+- **当前重点转为安装耗时与可见性，VM 升级结果仍未确认**：用户先报告 A→B 确认后窗口消失、安装目录为空、仍有 Weclio.exe；随后补充仅等待 3–5 分钟便结束进程，重装 A 已成功且耗时超过 10 分钟。因此不能据此判定升级永久失败或死锁，原现场已改变，尚需完整复测。用户明确 **B 不撤下、没有其他更新用户**；勿擅自更改线上发布。当前十余分钟的静默全量安装不能视为满足交付体验目标。
 - npm 与桌面 **0.1.12 已发布**，桌面为正式 Latest。真实安装版 **0.1.11 → 0.1.12 核心升级验收通过**；成功差异传输未验证，具体证据与限制见下方最新记录及阶段 2 文档。
 - 用户已明确批准所有改动 commit／push，并在后续要求 **npm 与桌面两边 publish，然后继续升级验收**；私钥独立备份已确认完成。原始 handoff 的“仅文档、无发布授权”已被后续授权取代。
 - A=0.1.11，已安装 B=0.1.12；npm 与桌面标签均指向源码 `271a02e`。测试窗口已正常关闭，8890／9227 已释放；8888 开发服务和 8899 fixture 保持运行。安装目录、独立 profile 及仓库外备份见后文。首次发布前的“未分发”结论不适用于未来发布。
@@ -26,7 +28,7 @@
 ## 对话中需要保留的协作上下文
 
 - 用户强调“聪明地分阶段推进”：先低成本验证具体边界，稳定后才打包；不要每次 fix 都重跑昂贵全流程。回复中文、言简意赅。
-- 未准备 VM 或完整隔离环境；独立 Electron 窗口不等于隔离。也不要擅自停当前开发服务，它可能承载 agent 和其他工作。环境事实自己检查。
+- 用户现有 VM，并已尝试 A→B；等待 3–5 分钟后结束进程，故完整升级结果未确认。独立 Electron 窗口不等于隔离；不要擅自停当前开发服务，它可能承载 agent 和其他工作。环境事实自己检查。
 - 先前复杂安装原型已撤回。不要从旧对话恢复原型；当前选定边界以 `docs/desktop-update-stage2.md` 为准。
 - 用户曾要求 fresh subagent 对照参考项目。必要时直接读：
   - `D:/ivanj/Documents/0-1/2_product/playground/deepseek-harness/apps/desktop/src/update-coordinator.ts`
@@ -73,4 +75,13 @@ node --test electron/updates.integration.test.mjs electron/updates-install-servi
 - **差分**：A 未发布，旧 blockmap 请求 404 后正常回退全量；本轮未证明成功差异传输。B 的配对 blockmap 已公开，NSIS 当前 installer.exe 缓存与 B 安装包哈希一致。等下次真实版本观察即可，不为此立即打 C。
 - **收尾**：B 已保持安装，测试窗口正常关闭；8890／9227 释放，原 8888 开发服务（历史 PID 16520）与 8899 fixture 未动。新建快捷方式保留独立 profile 参数，远程调试参数已移除；用户原 Electron profile 未被测试实例打开。下一次操作必须重新核实进程身份，不能拿此处历史 PID 直接 kill。
 - **证据入口**（均在忽略目录 `build/desktop/update-acceptance/`）：`upgrade-core-verified.json` 汇总；`automatic-B-ui-ready.json`、`installed-B-version.json`、`installer-handoff-processes.json` 为自动链路；`data-before-B.json`／`data-after-B.json` 为数据快照；`B-manual-diagnostic-restart.json` 和对应截图为后续诊断。`release-B-remote.json`／`desktop-release-final-state.json` 为公开状态，`release-B-draft-assets-verified.json` 保留草稿验收；另有 npm、公开清单及最终运行状态回执。独立只读复核支持附有限定的核心验收结论。
-- **后续边界**：当前核心目标完成；忙任务竞态、beforeunload 与安装失败分支并未全部在安装版重跑，仍分别引用已有自动／空白窗口测试。不新增回滚或退出后恢复承诺。以后公开发布可能已有客户端，需重新确认影响范围，不复用此次“无其他客户端”的历史前提。
+- **当时验收边界**：上述本机核心闭环曾通过；忙任务竞态、beforeunload 与安装失败分支并未全部在安装版重跑，仍分别引用已有自动／空白窗口测试。后续 VM 报告及等待时长补充影响当前发布判断，见本文顶部最新状态。不新增回滚或退出后恢复承诺。以后公开发布可能已有客户端，需重新确认影响范围，不复用此次“无其他客户端”的历史前提。
+
+## 2026-11-08 UTC：更新性能范围与初始调研
+
+- 用户要求普通 feature 更新从确认重启到新版可交互尽量不超过 30 秒，并指出长期静默不可接受。此目标尚未验证，不能把“全量升级成功”当作性能达标。
+- 本机已安装 B 的只读文件元数据统计：46280 文件，1562344899 字节（约 1.56 GB）；其中生产 node_modules 为 35829 文件／542197300 字节，Portable Git 为 9616 文件／411469746 字节。证据：忽略目录 `build/desktop/update-acceptance/installed-B-inventory.json`。统计揭示重复全量处理规模，不等于已经测出卸载／解压／复制／冷启动各阶段的耗时归因。
+- 当前 NSIS 仍卸载旧安装文件，再解压及复制完整新版；差分仅优化传输，不消除此安装工作。现有 server 由系统 Node 从真实目录启动，不能不验证就把所有依赖直接塞进 ASAR。
+- 用户进一步明确：**Git/Bash 应剥离出常规业务 updater**。首次准备后普通 feature 更新不重新下载／替换 Git；按需安全维护应独立处理，不能解释成永久不维护。当前源码并没有每次联网检查 Git 新版本，只做必需工具存在检查；实际浪费来自每次完整打包、随应用卸载和重装工具。不能只删打包映射：运行路径仍在安装目录内，须先设计独立稳定目录及旧安装迁移，否则旧卸载器会删掉 Git。
+- 其他评估方向是 Node 打包减量、未变依赖复用，以及后台校验与准备后再进行短暂版本切换；准备进度需可见、旧版仍可用。尚未决定切换框架或加入依赖，未改安装机制、未构建或发布新版本；不得把上述初始方案写成已实现或保证任意机器 30 秒；后续实现和验证进展以 `desktop-update-performance.md` 为准。
+- Node 依赖物料已进一步实数：542197300 字节／35829 文件；大头为 next 184.7 MB、Windows SWC 106.2 MB、pi-coding-agent 32.2 MB、TypeScript 23.6 MB、OpenAI 18.5 MB、Google GenAI 11.3 MB、Anthropic SDK 9.5 MB。其中 source maps 共 136418774 字节／7839 文件，已经包含在总量中，不能重复相加。数据在忽略目录 `build/desktop/update-acceptance/installed-node-dependencies.json`；只是物理大小统计，不能据此断言整个 SWC／TypeScript／某 SDK 都可删除。

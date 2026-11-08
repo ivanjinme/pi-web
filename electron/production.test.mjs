@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { test } from "node:test";
 import { resolveSystemNode, startProductionServer } from "./production.mjs";
 import { createRuntimeEnvironment } from "./runtime.mjs";
+import { createToolsetManifest } from "./toolsets.mjs";
 
 const runtime = resolve("resources/runtime/win-x64");
 
@@ -82,6 +83,73 @@ test("production initializes bundled packages before Next and never initializes 
     await new Promise(resolve=>{server.close(resolve);server.closeAllConnections();});
     await assert.rejects(startProductionServer(options),/内置包初始化失败.*fixture initialization failure/);
     assert.equal(globalThis.bootstrapCalls,1);
+  `;
+  execFileSync(process.execPath, ["--input-type=module", "-e", script], { stdio: "pipe", timeout: 20_000 });
+});
+
+test("production uses the shared toolset PATH for bootstrap and Next, including source-free cached startup", async (t) => {
+  const temporary = await mkdtemp(join(tmpdir(), "weclio-production-toolset-"));
+  t.after(() => rm(temporary, { recursive: true, force: true }));
+  const resources = join(temporary, "installation", "resources");
+  const sourceRoot = join(resources, "runtime", "win-x64");
+  const sharedRoot = join(temporary, "toolsets");
+  for (const file of ["server/.next/BUILD_ID", "server/node_modules/next/dist/bin/next", "runtime/win-x64/git/bin/bash.exe", "runtime/win-x64/git/cmd/git.exe", "runtime/win-x64/tools/rg.exe", "runtime/win-x64/tools/fd.exe"]) {
+    await mkdir(dirname(join(resources, file)), { recursive: true });
+    await writeFile(join(resources, file), `fixture:${file}`);
+  }
+  const manifest = await createToolsetManifest(sourceRoot);
+  await writeFile(join(resources, "desktop-toolset.json"), JSON.stringify(manifest));
+  const destination = join(sharedRoot, manifest.id);
+  const mock = `
+    import assert from 'node:assert/strict';
+    import {EventEmitter} from 'node:events';
+    import {win32} from 'node:path';
+    export function spawn(command,args,options) {
+      const entries=options.env.PATH.split(';');
+      for(const suffix of [['git','cmd'],['git','bin'],['tools']]) {
+        assert.ok(entries.includes(win32.join(${JSON.stringify(destination)},...suffix)), 'Shared tool missing from child PATH');
+        assert.ok(!entries.includes(win32.join(${JSON.stringify(sourceRoot)},...suffix)), 'Legacy tool tree leaked into child PATH');
+      }
+      const bootstrap=args[0].endsWith('desktop-packages.mjs');
+      if(!bootstrap)assert.equal(args[0],${JSON.stringify(join(resources, "server/node_modules/next/dist/bin/next"))});
+      (globalThis.toolsetSpawns??=[]).push(bootstrap?'bootstrap':'next');
+      const child=Object.assign(new EventEmitter(),{stdout:new EventEmitter(),stderr:new EventEmitter(),connected:true,exitCode:null,signalCode:null});
+      queueMicrotask(()=>bootstrap?child.emit('close',0):child.stdout.emit('data','Ready in fixture'));
+      return child;
+    }
+    export function spawnSync(command,args) {
+      if(args[0]==='-p')return {status:0,stdout:JSON.stringify({executable:process.execPath,version:process.versions.node,arch:'x64'})};
+      return {status:0,stdout:'11.0.0'};
+    }
+  `;
+  const serverMock = `export async function assertPortAvailable(){};export async function waitForServer(url,options){await Promise.resolve();if(!options.isReady())throw Error('Not ready');}`;
+  const script = `
+    import assert from 'node:assert/strict';
+    import {readFile,rm} from 'node:fs/promises';
+    import {join} from 'node:path';
+    import {registerHooks} from 'node:module';
+    Object.defineProperty(process,'platform',{value:'win32'});
+    for(const key of Object.keys(process.env))if(key.toLowerCase()==='path')delete process.env[key];
+    process.env.PATH='fixture-system-path';
+    registerHooks({resolve(name,context,next){
+      if(name==='node:child_process')return {url:${JSON.stringify(`data:text/javascript,${encodeURIComponent(mock)}`)},shortCircuit:true};
+      if(name==='./server.mjs')return {url:${JSON.stringify(`data:text/javascript,${encodeURIComponent(serverMock)}`)},shortCircuit:true};
+      return next(name,context);
+    }});
+    const {startProductionServer}=await import(${JSON.stringify(new URL("./production.mjs", import.meta.url).href)});
+    const progress=[];
+    const options={resourcesPath:${JSON.stringify(resources)},toolsetsRoot:${JSON.stringify(sharedRoot)},logsPath:${JSON.stringify(join(temporary, "logs"))},url:'http://127.0.0.1:0',onToolProgress:event=>progress.push(event)};
+    const first=await startProductionServer(options);
+    first.stop();
+    assert.equal(progress.at(-1).reused,false);
+    for(const file of ${JSON.stringify(manifest.files)})assert.deepEqual(await readFile(join(${JSON.stringify(destination)},file.path)),await readFile(join(${JSON.stringify(sourceRoot)},file.path)));
+    await rm(${JSON.stringify(sourceRoot)},{recursive:true});
+    progress.length=0;
+    const second=await startProductionServer(options);
+    second.stop();
+    assert.equal(progress.length,1);
+    assert.equal(progress[0].reused,true);
+    assert.deepEqual(globalThis.toolsetSpawns,['bootstrap','next','bootstrap','next']);
   `;
   execFileSync(process.execPath, ["--input-type=module", "-e", script], { stdio: "pipe", timeout: 20_000 });
 });

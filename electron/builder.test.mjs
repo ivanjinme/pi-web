@@ -31,8 +31,29 @@ test("server dependencies have a dedicated resource mapping, including nested de
 });
 
 test("updater main modules and sandbox preload are packaged with optional fixed config", () => {
-  for (const name of ["preload.cjs", "updates.mjs", "update-signature.mjs", "update-install.mjs", "update-gate.mjs"]) assert.ok(config.files.includes(`electron/${name}`));
+  for (const name of ["preload.cjs", "updates.mjs", "update-signature.mjs", "update-install.mjs", "update-gate.mjs", "toolsets.mjs"]) assert.ok(config.files.includes(`electron/${name}`));
   assert.deepEqual(config.extraResources.find((entry) => entry.from === "resources"), { from: "resources", to: ".", filter: ["desktop-update.json"] });
+});
+
+test("server resources omit build tracing and source maps without losing runtime manifests or assets", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "weclio-server-filter-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const source = join(root, "server");
+  const destination = join(root, "copied");
+  const kept = ["package.json", "next.config.js", "desktop-packages.mjs", "LICENSE", "public/brand/logo.svg", ".next/BUILD_ID", ".next/required-server-files.json", ".next/server/app/api/test/route.js", ".next/static/chunks/test.js", ".next/server/app/page.js.map-data.json"];
+  const omitted = [".next/server/app/api/test/route.js.nft.json", ".next/next-server.js.nft.json", ".next/server/chunks/test.js.map", ".next/static/chunks/test.mjs.map", ".next/server/test.cjs.map", ".next/cache/secret.json", ".next/trace", ".next/trace-build"];
+  for (const file of [...kept, ...omitted]) {
+    await mkdir(join(source, file, ".."), { recursive: true });
+    await writeFile(join(source, file), file);
+  }
+  const mapping = config.extraResources.find((entry) => entry.to === "server");
+  await copyFiles([new FileMatcher(source, destination, (value) => value, mapping.filter)]);
+  for (const file of kept) assert.equal(await readFile(join(destination, file), "utf8"), file);
+  for (const file of omitted) await assert.rejects(readFile(join(destination, file)), { code: "ENOENT" });
+});
+
+test("bootstrap installer ships a generated toolset descriptor separately from trust config", () => {
+  assert.deepEqual(config.extraResources.find((entry) => entry.to === "desktop-toolset.json"), { from: "build/desktop/toolset.json", to: "desktop-toolset.json" });
 });
 
 test("production updater cache matches the installer cache instead of the development fallback", async () => {

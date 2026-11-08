@@ -185,6 +185,27 @@ test("packaged mode shows initialization before starting its service and stops i
   `, 'win32', true);
 });
 
+test("shared tools are profile-independent and startup progress is throttled", () => {
+  runMain(`
+    if (process.env.LOCALAPPDATA) {
+      assert.equal(production.starts[0].toolsetsBase, process.env.LOCALAPPDATA);
+      assert.notEqual(production.starts[0].toolsetsBase, profile);
+    }
+    const now = Date.now;
+    Date.now = () => 1000;
+    try {
+      const progress = production.starts[0].onToolProgress;
+      const count = window.webContents.scripts.length;
+      progress({ phase:'copying', completedFiles:0, totalFiles:5 });
+      progress({ phase:'copying', completedFiles:1, totalFiles:5 });
+      progress({ phase:'ready', completedFiles:5, totalFiles:5, reused:false });
+      progress({ phase:'ready', completedFiles:5, totalFiles:5, reused:true });
+      assert.equal(window.webContents.scripts.length, count + 2);
+      assert.match(window.webContents.scripts.at(-1), /5\\/5/);
+    } finally { Date.now = now; }
+  `, 'win32', true);
+});
+
 test("packaged startup restores its remembered port before loading or authorizing the window", () => {
   runMain(`
     assert.equal(production.starts[0].url, 'http://127.0.0.1:8890');

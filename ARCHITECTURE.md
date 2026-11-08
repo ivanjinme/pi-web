@@ -38,6 +38,18 @@ Browser                Next.js Server              AgentSession (in-process)
 | Referenced external files | `lib/session-file-references.ts` |
 | Default workspace | `lib/default-workspace.ts` |
 
+## Desktop runtime boundary
+
+- Packaged Next still runs under the user's system Node/npm, outside ASAR.
+- Descriptor-bearing bootstrap installations prepare verified Git/Bash/rg/fd in
+  a content-addressed, per-user store outside the installation directory.
+  `electron/toolsets.mjs` owns migration, cache reuse and canonical path checks;
+  it does not check online Git releases. The installer still carries seed tools.
+- Background application-package preparation / fast version selection is not yet
+  a production update channel. See `docs/desktop-update-performance.md` for measured
+  prototype boundaries and remaining acceptance; do not equate backend HTTP
+  readiness with completed Electron update acceptance.
+
 ## Session Boundaries
 
 - **Browse:** persisted JSONL; no `AgentSession`. Sidebar discovery reads only

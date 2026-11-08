@@ -7,11 +7,12 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import nodeVersion from "../bin/node-version.js";
 import { prepareSignedUpdate, readReleaseSigning } from "./update-release.mjs";
+import { createToolsetManifest } from "./toolsets.mjs";
 export { validateInstaller } from "./update-release.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const require = createRequire(import.meta.url);
-const inputs = ["app", "components", "hooks", "lib", "public", "instrumentation.ts", "proxy.ts", "postcss.config.mjs", "tailwind.config.ts", "tsconfig.json", "next.config.ts", "package.json", "package-lock.json", "LICENSE", "electron/build.mjs", "electron/packages.mjs"];
+const inputs = ["app", "components", "hooks", "lib", "public", "instrumentation.ts", "proxy.ts", "postcss.config.mjs", "tailwind.config.ts", "tsconfig.json", "next.config.ts", "package.json", "package-lock.json", "LICENSE", "electron/build.mjs", "electron/packages.mjs", "electron/package-files.mjs", "electron/toolsets.mjs"];
 
 export async function fingerprint(base, paths = inputs) {
   const hash = createHash("sha256");
@@ -100,13 +101,16 @@ async function main() {
     const serverHash = await fingerprint(server, [".next", "node_modules", "package.json", "next.config.js", "desktop-packages.mjs", "public", "LICENSE"]);
     await writeFile(snapshot, JSON.stringify({ version, fingerprint: initial, server: serverHash }) + "\n");
   }
+  // --quick 可复用服务构建，但工具描述必须绑定本次实际打包的工具。
+  if (args.includes("--quick")) await writeFile(join(root, "build/desktop/toolset.json"), JSON.stringify(await createToolsetManifest(join(root, "resources/runtime/win-x64"))) + "\n");
   await mkdir(join(root, "build/desktop"), { recursive: true });
+  const toolsetFingerprint = await fingerprint(root, ["build/desktop/toolset.json"]);
   const output = await mkdtemp(join(root, "build/desktop/release-"));
   try {
     const builder = require.resolve("electron-builder/cli.js");
     const saved = JSON.parse(await readFile(snapshot, "utf8"));
     await run(process.execPath, [builder, "--config", "electron/builder.json", "--win", "--x64", "--publish", "never", "--config.directories.output", output]);
-    if (await fingerprint(root) !== initial || await fingerprintPackaging(root) !== packagingFingerprint || saved.server !== await fingerprint(server, [".next", "node_modules", "package.json", "next.config.js", "desktop-packages.mjs", "public", "LICENSE"])) throw new Error("打包过程中源文件或构建产物变化，请重新执行。");
+    if (await fingerprint(root) !== initial || await fingerprintPackaging(root) !== packagingFingerprint || await fingerprint(root, ["build/desktop/toolset.json"]) !== toolsetFingerprint || saved.server !== await fingerprint(server, [".next", "node_modules", "package.json", "next.config.js", "desktop-packages.mjs", "public", "LICENSE"])) throw new Error("打包过程中源文件或构建产物变化，请重新执行。");
     const result = await retainDesktopRelease({ output, dist, version, signing });
     console.log(`\n安装包: ${result.installerPath}\n差异文件: ${result.blockmapPath}\n签名清单: ${result.manifestPath}\nSHA256: ${result.sha256}\n更新清单已作 Ed25519 签名；EXE 未做 Windows 代码签名。验收后手动发布 desktop-v${version}，本命令不会上传。`);
   } finally {

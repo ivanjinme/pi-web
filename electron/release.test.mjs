@@ -38,7 +38,7 @@ test("quick-build fingerprint changes when a source or dependency file changes",
 
 test("a clean checkout does not require or fingerprint generated next-env.d.ts", async (t) => {
   const dir = await fixture(t);
-  for (const file of ["app", "components", "hooks", "lib", "public", "instrumentation.ts", "proxy.ts", "postcss.config.mjs", "tailwind.config.ts", "tsconfig.json", "next.config.ts", "package.json", "package-lock.json", "LICENSE", "electron/build.mjs", "electron/packages.mjs"]) {
+  for (const file of ["app", "components", "hooks", "lib", "public", "instrumentation.ts", "proxy.ts", "postcss.config.mjs", "tailwind.config.ts", "tsconfig.json", "next.config.ts", "package.json", "package-lock.json", "LICENSE", "electron/build.mjs", "electron/packages.mjs", "electron/package-files.mjs", "electron/toolsets.mjs"]) {
     await mkdir(dirname(join(dir, file)), { recursive: true });
     await writeFile(join(dir, file), "fixture");
   }

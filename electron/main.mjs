@@ -153,11 +153,21 @@ app.whenReady().then(async () => {
     // 先显示可关闭的启动页；异步初始化不能让慢磁盘上的首次启动看起来毫无响应。
     const html = '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Weclio</title><style>body{margin:0;background:#f8f7ff;color:#1d1e21;font:16px system-ui;display:grid;place-content:center;min-height:100vh}h1{font-size:24px;font-weight:500}p{color:#625e70}</style><main role="status"><h1>正在启动 Weclio</h1><p>首次打开需要准备内置扩展与技能，请稍候。</p></main></html>';
     await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    let lastToolProgress = 0;
     service = await startProductionServer({
       resourcesPath: process.resourcesPath,
       logsPath: app.getPath("logs"),
       url: SERVER_URL,
       signal: startup.signal,
+      toolsetsBase: process.env.LOCALAPPDATA,
+      onToolProgress: (progress) => {
+        if (quitting || window.isDestroyed() || progress.reused) return;
+        const now = Date.now();
+        if (progress.phase !== "ready" && now - lastToolProgress < 250) return;
+        lastToolProgress = now;
+        const text = `正在准备基础工具：${progress.completedFiles}/${progress.totalFiles}。后续普通更新将复用这些工具。`;
+        void window.webContents.executeJavaScript(`document.querySelector('main p')?.replaceChildren(document.createTextNode(${JSON.stringify(text)}))`).catch((error) => console.error("[desktop] 无法显示工具准备进度:", error.message));
+      },
       onUnexpectedExit: (error) => showError(error.message),
     });
   }

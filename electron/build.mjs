@@ -5,6 +5,8 @@ import { createRequire } from "node:module";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { copyProductionDependency } from "./package-files.mjs";
+import { createToolsetManifest } from "./toolsets.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const server = join(root, "build", "desktop", "server");
@@ -60,9 +62,10 @@ try {
   }
   console.log(`[desktop] 复制 ${packages.length} 个生产依赖目录。`);
   for (let index = 0; index < packages.length; index += 8) {
-    await Promise.all(packages.slice(index, index + 8).map((directory) => cp(directory, join(server, relative(root, directory)), { recursive: true, dereference: true })));
+    await Promise.all(packages.slice(index, index + 8).map((directory) => copyProductionDependency(directory, join(server, relative(root, directory)))));
   }
   await rm(join(server, ".next", "cache"), { recursive: true, force: true });
+  await writeFile(join(root, "build/desktop/toolset.json"), JSON.stringify(await createToolsetManifest(join(root, "resources/runtime/win-x64"))) + "\n");
   console.log("[desktop] 生产服务准备完成: build/desktop/server");
 } catch (error) {
   console.error(`[desktop] ${error.message}`);
