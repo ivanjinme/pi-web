@@ -12,49 +12,49 @@ node_modules/.bin/tsc --noEmit
 npm run lint
 ```
 
-Desktop: `PORT` overrides 8888; requires a free port. Close window/Ctrl+C cleans up.
-Desktop and Web development are alternatives: stop the existing server before switching.
-One Next dev server per directory, regardless of port.
-
 Never run `next build` during development; it pollutes `.next/`.
 
-## Windows desktop
+## Publish desktop
 
-Once: install Portable Git (with Bash), rg, fd in `resources/runtime/win-x64/`; create the
-signing key outside the repo with `npm run setup:desktop-updates`. Back it up.
-
-Shell installer — Electron, main/preload, startup protocol, tools, or any first migration:
+Electron, main/preload, startup protocol, tools, or first migration:
 
 ```bash
-npm version 0.1.13 --no-git-tag-version   # stable; shared with npm
-npm run release:desktop                   # tests, Next build, NSIS, signed manifest
-npm run release:desktop -- --quick        # version-only change; reuses the Next build
+npm run setup:desktop-updates              # once; key lives outside the repo
+npm version 0.1.13 --no-git-tag-version
+npm run release:desktop
+npm run release:desktop -- --quick         # version-only change
+
+v=$(node -p "require('./package.json').version")
+gh release create "desktop-v$v" --draft --target HEAD --title "Weclio desktop $v" \
+  --notes "Desktop app update." \
+  "build/desktop/dist/Weclio-$v-x64-Setup.exe" \
+  "build/desktop/dist/Weclio-$v-x64-Setup.exe.blockmap" \
+  "build/desktop/dist/desktop-update-manifest.json" \
+  "build/desktop/dist/SHA256SUMS.txt"
+gh release edit "desktop-v$v" --draft=false --latest
 ```
 
-Output `build/desktop/dist/`: EXE, `.blockmap`, `desktop-update-manifest.json`,
-`SHA256SUMS.txt`. Build also generates `toolset.json`/`shell.json`, bundled as
-`resources/desktop-toolset.json`/`desktop-shell.json`. Never commits, tags, uploads
-or installs. Ed25519 signs the manifest; the EXE is not Authenticode-signed.
-
-Business package — ordinary feature update, no Git, requires the deployed shell:
+Feature-only change (shell digest and toolset unchanged):
 
 ```bash
 npm run build:desktop
-node electron/application-release.mjs --server "%CD%\build\desktop\server" \
-  --output "%CD%\build\desktop\dist" \
-  --zip "%LOCALAPPDATA%\electron-builder\Cache\7zip@1.0.0\7zip-win-x64-a34pt\bin\7za.exe"
+node electron/application-release.mjs --server "$PWD/build/desktop/server" \
+  --output "$PWD/build/desktop/dist" \
+  --zip "$LOCALAPPDATA/electron-builder/Cache/7zip@1.0.0/7zip-win-x64-a34pt/bin/7za.exe"
+
+v=$(node -p "require('./package.json').version")
+gh release create "desktop-v$v" --draft --target HEAD --title "Weclio desktop $v" \
+  --notes "Desktop app update. Shell installer: previous release." \
+  "build/desktop/dist/Weclio-$v-x64-Application.zip" \
+  "build/desktop/dist/Weclio-$v-x64-Application.files.json" \
+  "build/desktop/dist/desktop-application-manifest.json"
+gh release edit "desktop-v$v" --draft=false --latest
 ```
 
-Valid only while the shell digest and toolset are unchanged (`--shell` selects the
-deployed descriptor; default is this build's). Anything else is a shell release.
-Local only; no upload.
+Before `--latest`, compare `Get-FileHash -Algorithm SHA256` with `SHA256SUMS.txt`.
+Never `--clobber` a public release; bump the version. Details: `docs/desktop-release.md`.
 
-Users need Node 22.19+ with npm. Python/Pandoc/Office are not bundled.
-
-## Publish
-
-npm — tag `v*` triggers `.github/workflows/publish.yml` (webpack build). Never run
-`npm run release` for this flow:
+## Publish npm
 
 ```bash
 npm version patch --no-git-tag-version
@@ -63,9 +63,5 @@ git add package.json package-lock.json && git commit -m "Release v$VERSION"
 git tag "v$VERSION" && git push origin main "v$VERSION"
 ```
 
-Desktop — tag `desktop-v<version>`, never `v*`. After `release:desktop`, recompute
-SHA256 with `Get-FileHash -Algorithm SHA256` and compare `SHA256SUMS.txt`, then
-`gh release create --draft` → attach → `gh release edit --latest`. Latest drives both
-EXE and business-package discovery; a business release carries no EXE, so keep the
-shell installer in its notes. Never `--clobber` a public release — bump the version.
-npm publishing is unrelated to desktop updates. Full procedure: `docs/desktop-release.md`.
+Tag `v*` triggers `.github/workflows/publish.yml`. Never run `npm run release`.
+Desktop tags are `desktop-v*`, never `v*`.
