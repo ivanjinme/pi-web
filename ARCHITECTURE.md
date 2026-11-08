@@ -45,10 +45,12 @@ Browser                Next.js Server              AgentSession (in-process)
   a content-addressed, per-user store outside the installation directory.
   `electron/toolsets.mjs` owns migration, cache reuse and canonical path checks;
   it does not check online Git releases. The installer still carries seed tools.
-- Background application-package preparation / fast version selection is not yet
-  a production update channel. See `docs/desktop-update-performance.md` for measured
-  prototype boundaries and remaining acceptance; do not equate backend HTTP
-  readiness with completed Electron update acceptance.
+- Background application-package preparation / fast version selection is now a
+  production channel in source (signed server-only packages prepared outside the
+  installation, then a short switch), but it has not passed real different-version
+  acceptance. See `docs/desktop-update-performance.md` for measured prototype
+  boundaries and remaining work; do not equate backend HTTP readiness with
+  completed Electron update acceptance.
 
 ## Session Boundaries
 

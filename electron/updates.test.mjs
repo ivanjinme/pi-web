@@ -184,6 +184,10 @@ test("IPC restricts owning window, app origin and main frame; restart is explana
   await handlers.get(UPDATE_CHANNELS.restart)(event, "zh-CN");
   assert.match(prompts[0][1].message, /不会安装或重启/);
   assert.deepEqual(prompts[0][1].buttons, ["知道了"]);
+  // 未注入服务或缺窗口时也不能向任意页面暴露新的更新操作。
+  assert.equal(await handlers.get(UPDATE_CHANNELS.check)(event), undefined);
+  assert.equal(await handlers.get(UPDATE_CHANNELS.ready)(event), undefined);
+  for (const channel of [UPDATE_CHANNELS.check, UPDATE_CHANNELS.ready]) assert.throws(() => handlers.get(channel)({ ...event, sender: {} }), /Untrusted/);
   for (const locale of ["en", "unsupported", undefined]) {
     await handlers.get(UPDATE_CHANNELS.restart)(event, locale);
     const prompt = prompts.at(-1)[1];
@@ -197,8 +201,11 @@ test("sandbox preload exposes only named methods and listener unsubscribe", asyn
   let api; const listeners = new Map(); const invoked = [];
   const ipcRenderer = { invoke: (channel, ...args) => { invoked.push([channel, ...args]); return Promise.resolve({ status: "idle" }); }, on: (name, fn) => listeners.set(name, fn), removeListener: (name, fn) => { assert.equal(listeners.get(name), fn); listeners.delete(name); } };
   runInNewContext(await readFile(new URL("./preload.cjs", import.meta.url), "utf8"), { require: (name) => { assert.equal(name, "electron"); return { ipcRenderer, contextBridge: { exposeInMainWorld(name, value) { assert.equal(name, "weclioDesktop"); api = value; } } }; } });
-  assert.deepEqual(Object.keys(api), ["getUpdateState", "onUpdateState", "restartUpdate"]);
-  await api.getUpdateState(); await api.restartUpdate("zh-CN"); assert.deepEqual(invoked, [[UPDATE_CHANNELS.get], [UPDATE_CHANNELS.restart, "zh-CN"]]);
+  assert.deepEqual(Object.keys(api), ["getUpdateState", "onUpdateState", "restartUpdate", "applicationReady", "checkForUpdates"]);
+  assert.equal(typeof api.applicationReady, "function");
+  assert.equal(typeof api.checkForUpdates, "function");
+  await api.getUpdateState(); await api.restartUpdate("zh-CN"); await api.applicationReady(); await api.checkForUpdates();
+  assert.deepEqual(invoked, [[UPDATE_CHANNELS.get], [UPDATE_CHANNELS.restart, "zh-CN"], [UPDATE_CHANNELS.ready], [UPDATE_CHANNELS.check]]);
   let received; const unsubscribe = api.onUpdateState((state) => { received = state; });
   listeners.get(UPDATE_CHANNELS.state)({ secret: true }, { status: "downloaded" }); assert.deepEqual(received, { status: "downloaded" }); unsubscribe(); assert.equal(listeners.size, 0);
 });

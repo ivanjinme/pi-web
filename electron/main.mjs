@@ -4,13 +4,57 @@ import { initializeUpdates, registerUpdateBridge, UPDATE_CHANNELS } from "./upda
 import { createUpdateInstaller } from "./update-install.mjs";
 import { SERVER_URL, isAppUrl, isExternalUrl, isPermissionAllowed, restoreDesktopPort } from "./navigation.mjs";
 import { startProductionServer } from "./production.mjs";
+import { assertPortAvailable } from "./server.mjs";
+import { createApplicationRuntime } from "./application-runtime.mjs";
+import { resolveDesktopTools } from "./toolsets.mjs";
 
 app.setName("Weclio");
+// 同一 profile 只允许一个实例；并发启动会让“试用未确认”被误判为崩溃回退。
+const holdsSingleInstance = app.requestSingleInstanceLock();
+if (!holdsSingleInstance) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  });
+}
 let mainWindow = null;
 let service = null;
 let quitting = false;
 const startup = new AbortController();
 let updates = null;
+let applicationRuntime = null;
+let healthTimer;
+// 健康确认前切到新版只是试用；确认失败要能回到旧程序。
+function trialCandidate() {
+  try { return applicationRuntime?.selection.needsHealthAcknowledgement() === true; }
+  catch { return false; }
+}
+function cancelHealthTimer() { clearTimeout(healthTimer); healthTimer = undefined; }
+async function acknowledgeApplication() {
+  if (!trialCandidate()) return;
+  cancelHealthTimer();
+  await applicationRuntime.selection.healthy();
+  console.log("[desktop] 新版已确认可用。");
+}
+async function applyApplication(id) {
+  // 先确认自有服务退出，再提交选择；任一步失败都保持指针不变。
+  await service.stopAndWait();
+  service = null;
+  try {
+    await applicationRuntime.selection.commit(id);
+  } catch (error) {
+    // 服务已停且无法提交：重启后仍是旧版本，不能留一个空白窗口。
+    console.error("[desktop] 无法提交出新版选择:", error.message);
+    app.relaunch();
+    app.exit(1);
+    return;
+  }
+  app.relaunch();
+  app.exit(0);
+}
 const installer = createUpdateInstaller({
   app, dialog, getService: () => updates, getWindow: () => mainWindow, getGate: () => service?.updateGate,
   restoreWindow: async () => {
@@ -20,7 +64,7 @@ const installer = createUpdateInstaller({
     }
   },
 });
-const removeUpdateBridge = registerUpdateBridge({ ipcMain, getWindow: () => mainWindow, isAppUrl, getService: () => updates, dialog, installer });
+const removeUpdateBridge = registerUpdateBridge({ ipcMain, getWindow: () => mainWindow, isAppUrl, getService: () => updates, dialog, installer, onApplicationReady: acknowledgeApplication });
 
 function showError(message) {
   service?.stop();
@@ -38,6 +82,7 @@ app.on("before-quit", (event) => {
 app.on("will-quit", () => {
   console.log("[desktop] 正在退出。");
   quitting = true;
+  cancelHealthTimer();
   service?.stop();
   startup.abort();
   installer.dispose();
@@ -146,7 +191,7 @@ function createMainWindow() {
   return window;
 }
 
-app.whenReady().then(async () => {
+if (holdsSingleInstance) app.whenReady().then(async () => {
   if (app.isPackaged) restoreDesktopPort(app.getPath("userData"));
   const window = createMainWindow();
   if (app.isPackaged) {
@@ -154,31 +199,68 @@ app.whenReady().then(async () => {
     const html = '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Weclio</title><style>body{margin:0;background:#f8f7ff;color:#1d1e21;font:16px system-ui;display:grid;place-content:center;min-height:100vh}h1{font-size:24px;font-weight:500}p{color:#625e70}</style><main role="status"><h1>正在启动 Weclio</h1><p>首次打开需要准备内置扩展与技能，请稍候。</p></main></html>';
     await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
     let lastToolProgress = 0;
+    const toolsetsBase = process.env.LOCALAPPDATA;
+    // 端口冲突先失败，避免白白做一次首次工具迁移。
+    await assertPortAvailable(Number(new URL(SERVER_URL).port || 80));
+    const onToolProgress = (progress) => {
+      if (quitting || window.isDestroyed() || progress.reused) return;
+      const now = Date.now();
+      if (progress.phase !== "ready" && now - lastToolProgress < 250) return;
+      lastToolProgress = now;
+      const text = `正在准备基础工具：${progress.completedFiles}/${progress.totalFiles}。后续普通更新将复用这些工具。`;
+      void window.webContents.executeJavaScript(`document.querySelector('main p')?.replaceChildren(document.createTextNode(${JSON.stringify(text)}))`).catch((error) => console.error("[desktop] 无法显示工具准备进度:", error.message));
+    };
+    const toolsRoot = await resolveDesktopTools({ resourcesPath: process.resourcesPath, storeBase: toolsetsBase, signal: startup.signal, onProgress: onToolProgress });
+    applicationRuntime = await createApplicationRuntime({
+      resourcesPath: process.resourcesPath,
+      localAppData: toolsetsBase,
+      profilePath: app.getPath("userData"),
+      shellVersion: app.getVersion(),
+      toolsRoot,
+    });
+    // 选择存于当前 profile；上次试用未确认会先回到旧程序。
+    const active = applicationRuntime ? await applicationRuntime.selection.begin() : null;
     service = await startProductionServer({
       resourcesPath: process.resourcesPath,
       logsPath: app.getPath("logs"),
       url: SERVER_URL,
       signal: startup.signal,
-      toolsetsBase: process.env.LOCALAPPDATA,
-      onToolProgress: (progress) => {
-        if (quitting || window.isDestroyed() || progress.reused) return;
-        const now = Date.now();
-        if (progress.phase !== "ready" && now - lastToolProgress < 250) return;
-        lastToolProgress = now;
-        const text = `正在准备基础工具：${progress.completedFiles}/${progress.totalFiles}。后续普通更新将复用这些工具。`;
-        void window.webContents.executeJavaScript(`document.querySelector('main p')?.replaceChildren(document.createTextNode(${JSON.stringify(text)}))`).catch((error) => console.error("[desktop] 无法显示工具准备进度:", error.message));
-      },
+      toolsetsRoot: toolsRoot,
+      toolsetsBase,
+      serverRoot: active?.serverRoot,
+      readyTimeout: trialCandidate() ? 60_000 : undefined,
+      onToolProgress,
       onUnexpectedExit: (error) => showError(error.message),
     });
+    if (trialCandidate()) {
+      // 页面一直健康不了也不能永久卡住：下次启动自动回退旧程序。
+      healthTimer = setTimeout(() => {
+        console.error("[desktop] 新版未能确认可用，下次启动将回退。");
+        void applicationRuntime.selection.rollback().catch((error) => console.error("[desktop] 无法记录回退:", error.message));
+      }, 90_000);
+      healthTimer.unref?.();
+    }
   }
   if (!quitting) {
     await window.loadURL(SERVER_URL);
     // 页面就绪后再启动后台检查，不阻塞首屏；缺少配置时保持静默。
-    void initializeUpdates({ app, publish: (state) => {
+    void initializeUpdates({ app, applicationRuntime, applyApplication, publish: (state) => {
       if (mainWindow && !mainWindow.isDestroyed() && isAppUrl(mainWindow.webContents.getURL())) mainWindow.webContents.send(UPDATE_CHANNELS.state, state);
     } }).then((service) => {
       if (quitting) service?.stop();
       else { updates = service; updates?.start(); }
     }).catch((error) => console.error("[desktop-update]", error.message));
   }
-}).catch((error) => { if (!quitting) showError(error.message); });
+}).catch(async (error) => {
+  if (quitting) return;
+  // 试用新版启动失败：立即回退并重启，不让用户反复撞同一错误。
+  if (trialCandidate()) {
+    try {
+      await applicationRuntime.selection.rollback();
+      app.relaunch();
+      app.exit(1);
+      return;
+    } catch (rollbackError) { console.error("[desktop] 无法回退新版:", rollbackError.message); }
+  }
+  showError(error.message);
+});

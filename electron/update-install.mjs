@@ -91,7 +91,7 @@ export function createUpdateInstaller({ app, getService, getWindow, getGate, dia
       // 窗口已经同意关闭；此后才允许标准 updater 启动安装器。
       phase = "handoff";
       unsubscribe = service.onInstallError((error) => { void recover(error).catch((failure) => log("[desktop-update] recovery:", failure.message)); });
-      service.quitAndInstall();
+      await service.quitAndInstall();
     } catch (error) { await recover(error); }
   }
 

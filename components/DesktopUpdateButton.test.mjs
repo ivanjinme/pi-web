@@ -15,11 +15,13 @@ const require = createRequire(import.meta.url);
 const jiti = createJiti(import.meta.url);
 const { enLocale } = await jiti.import("../lib/i18n/messages/en.ts");
 const { zhCNLocale } = await jiti.import("../lib/i18n/messages/zh-CN.ts");
+const { interpolateMessage } = await jiti.import("../lib/i18n/format.ts");
 
 function harness(bridge, locale = enLocale) {
   let state = { status: "idle" };
   let effect;
   let updates = 0;
+  const readyRef = { current: false };
   const errors = [];
   const exports = {};
   vm.runInNewContext(compiled, {
@@ -30,9 +32,10 @@ function harness(bridge, locale = enLocale) {
       if (id === "react") return {
         useState: () => [state, (next) => { state = next; updates++; }],
         useEffect: (callback) => { effect = callback; },
+        useRef: () => readyRef,
       };
       if (id === "@/hooks/useI18n") return {
-        useI18n: () => ({ locale: locale.id, t: (key) => locale.messages[key] }),
+        useI18n: () => ({ locale: locale.id, t: (key, params) => interpolateMessage(locale.messages[key], params) }),
       };
       return require(id);
     },
@@ -40,7 +43,7 @@ function harness(bridge, locale = enLocale) {
   const render = () => exports.DesktopUpdateButton();
   render();
   const cleanup = effect();
-  return { render, cleanup, errors, updates: () => updates, setLocale: (next) => { locale = next; } };
+  return { render, cleanup, replayEffect: () => effect(), errors, updates: () => updates, setLocale: (next) => { locale = next; } };
 }
 
 function bridgeFixture() {
@@ -120,15 +123,15 @@ test("downloaded snapshot shows a localized, always-clickable restart button", a
   }
 });
 
-test("switching language updates the ready label and native dialog locale without resubscribing", async () => {
+test("switching language updates the ready label and restart locale without resubscribing", async () => {
   const fixture = bridgeFixture();
   const view = harness(fixture.bridge);
   fixture.resolve({ status: "downloaded" });
   await settle();
-  assert.match(renderToStaticMarkup(view.render()), /New version/);
+  assert.match(renderToStaticMarkup(view.render()), /Restart to update/);
   await view.render().props.onClick();
   view.setLocale(zhCNLocale);
-  assert.match(renderToStaticMarkup(view.render()), /新版本/);
+  assert.match(renderToStaticMarkup(view.render()), /重启更新/);
   await view.render().props.onClick();
   assert.deepEqual(fixture.restartLocales(), ["en", "zh-CN"]);
   assert.deepEqual(fixture.calls, ["subscribe", "snapshot"]);
@@ -171,6 +174,93 @@ test("snapshot and restart failures are logged without changing visibility or di
   await view.render().props.onClick();
   assert.equal(view.errors.length, 2);
   assert.equal(view.render().props.disabled, undefined);
+  view.cleanup();
+});
+
+test("mount acknowledges readiness after subscribing and taking a snapshot, once across effect replay", async () => {
+  const fixture = bridgeFixture();
+  fixture.bridge.applicationReady = async () => { fixture.calls.push("ready"); };
+  const view = harness(fixture.bridge);
+  assert.deepEqual(fixture.calls, ["subscribe", "snapshot", "ready"]);
+  view.cleanup();
+  const cleanup = view.replayEffect();
+  assert.deepEqual(fixture.calls, ["subscribe", "snapshot", "ready", "subscribe", "snapshot"]);
+  cleanup();
+});
+
+test("readiness failures are logged without hiding update state", async () => {
+  const fixture = bridgeFixture();
+  fixture.bridge.applicationReady = async () => { throw new Error("IPC unavailable"); };
+  const view = harness(fixture.bridge);
+  fixture.emit({ status: "preparing", phase: "verifying" });
+  await settle();
+  assert.equal(view.errors.length, 1);
+  assert.match(renderToStaticMarkup(view.render()), /Verifying update/);
+  view.cleanup();
+});
+
+test("download and preparation progress are localized, noninteractive, and never offer restart", async () => {
+  for (const locale of [enLocale, zhCNLocale]) {
+    const fixture = bridgeFixture();
+    const view = harness(fixture.bridge, locale);
+    for (const [status, phase, key] of [
+      ["downloading", "download", "downloading"],
+      ["preparing", undefined, "preparing"],
+      ["preparing", "extracting", "extracting"],
+      ["preparing", "verifying", "verifying"],
+    ]) {
+      for (const [progress, percent] of [[-10, "0%"], [45.6, "46%"], [100, "100%"], [120, "100%"]]) {
+        fixture.emit({ status, phase, progress, kind: "application" });
+        const html = renderToStaticMarkup(view.render());
+        assert.ok(html.includes(locale.messages[`desktopUpdate.${key}`]));
+        assert.ok(html.includes(percent));
+        assert.match(html, /role="status"/);
+        assert.doesNotMatch(html, /<button|Restart to update|重启更新/);
+      }
+    }
+    for (const progress of [undefined, NaN, Infinity]) {
+      fixture.emit({ status: "preparing", phase: "extracting", progress });
+      const html = renderToStaticMarkup(view.render());
+      assert.ok(html.includes(locale.messages["desktopUpdate.extracting"]));
+      assert.doesNotMatch(html, /%|NaN|Infinity|<button/);
+    }
+    assert.equal(fixture.restartCalls(), 0);
+    view.cleanup();
+  }
+});
+
+test("localized error has a separate retry action that checks updates, never restarts", async () => {
+  for (const locale of [enLocale, zhCNLocale]) {
+    const fixture = bridgeFixture();
+    let retryCalls = 0;
+    fixture.bridge.checkForUpdates = async () => { retryCalls++; };
+    const view = harness(fixture.bridge, locale);
+    fixture.emit({ status: "error", kind: "application" });
+    const error = view.render();
+    const [status, retry] = error.props.children;
+    assert.equal(status.props.role, "status");
+    assert.equal(status.props.children, locale.messages["desktopUpdate.error"]);
+    assert.equal(retry.type, "button");
+    assert.equal(retry.props.children, locale.messages["desktopUpdate.retry"]);
+    await retry.props.onClick();
+    assert.equal(retryCalls, 1);
+    assert.equal(fixture.restartCalls(), 0);
+    fixture.bridge.checkForUpdates = async () => { throw new Error("Retry IPC unavailable"); };
+    await view.render().props.children[1].props.onClick();
+    assert.equal(view.errors.length, 1);
+    assert.equal(fixture.restartCalls(), 0);
+    view.cleanup();
+  }
+});
+
+test("legacy bridges without new methods still show errors safely without an inert retry", () => {
+  const fixture = bridgeFixture();
+  const view = harness(fixture.bridge);
+  fixture.emit({ status: "error" });
+  const html = renderToStaticMarkup(view.render());
+  assert.match(html, /Update failed/);
+  assert.doesNotMatch(html, /<button|Restart to update/);
+  assert.equal(fixture.restartCalls(), 0);
   view.cleanup();
 });
 

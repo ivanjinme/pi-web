@@ -4,8 +4,10 @@ import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { isAbsolute, join } from "node:path";
 import { updateKey, updateUrl, verifyManifest } from "./update-signature.mjs";
+import { createApplicationUpdateService } from "./application-updates.mjs";
+import { createUpdateCoordinator } from "./update-coordinator.mjs";
 
-export const UPDATE_CHANNELS = Object.freeze({ get: "desktop-update:get", state: "desktop-update:state", restart: "desktop-update:restart" });
+export const UPDATE_CHANNELS = Object.freeze({ get: "desktop-update:get", state: "desktop-update:state", restart: "desktop-update:restart", check: "desktop-update:check", ready: "desktop-update:ready" });
 const PERIOD = 4 * 60 * 60 * 1000;
 
 export async function loadUpdateConfig({ packaged, resourcesPath, env = process.env }) {
@@ -144,7 +146,7 @@ export function createUpdateService({ updater, token, abort = new AbortControlle
   };
 }
 
-export async function initializeUpdates({ app, publish, log = console.error }) {
+export async function initializeUpdates({ app, publish, log = console.error, applicationRuntime, applyApplication }) {
   const config = await loadUpdateConfig({ packaged: app.isPackaged, resourcesPath: process.resourcesPath });
   if (!config || process.platform !== "win32") return null;
   // 复用 server 的生产依赖，不向小型 ASAR 再复制一棵 node_modules。
@@ -157,10 +159,22 @@ export async function initializeUpdates({ app, publish, log = console.error }) {
   const Updater = makeManagedUpdater(NsisUpdater, installEnabled, config.updaterCacheDirName);
   const updater = new Updater({ provider: "custom", updateProvider: createSignedProvider(Provider, config, abort.signal) });
   updater.forceDevUpdateConfig = !app.isPackaged;
-  return createUpdateService({ updater, token: new CancellationToken(), abort, publish, log, installEnabled });
+  const useApplication = installEnabled && applicationRuntime && typeof applyApplication === "function";
+  if (!useApplication) return createUpdateService({ updater, token: new CancellationToken(), abort, publish, log, installEnabled });
+  // 不把业务包版本写进 updater：壳 EXE 的升级判断始终基于已安装壳，否则壳维护会被永久抑制。
+  let coordinator;
+  const legacy = createUpdateService({ updater, token: new CancellationToken(), abort, publish: (state) => coordinator?.receive("legacy", state), log, installEnabled });
+  const application = createApplicationUpdateService({
+    config, shell: applicationRuntime.shell, selection: applicationRuntime.selection,
+    storeRoot: applicationRuntime.storeRoot, toolsRoot: applicationRuntime.toolsRoot,
+    toolsetManifest: applicationRuntime.toolsetManifest, apply: applyApplication,
+    publish: (state) => coordinator?.receive("application", state), log, installEnabled,
+  });
+  coordinator = createUpdateCoordinator({ legacy, application, publish });
+  return coordinator;
 }
 
-export function registerUpdateBridge({ ipcMain, getWindow, isAppUrl, getService, dialog, installer }) {
+export function registerUpdateBridge({ ipcMain, getWindow, isAppUrl, getService, dialog, installer, onApplicationReady }) {
   function authorize(event) {
     const window = getWindow();
     if (!window || window.isDestroyed() || event.sender !== window.webContents ||
@@ -168,6 +182,8 @@ export function registerUpdateBridge({ ipcMain, getWindow, isAppUrl, getService,
     return window;
   }
   ipcMain.handle(UPDATE_CHANNELS.get, (event) => { authorize(event); return getService()?.getState() ?? { status: "idle" }; });
+  ipcMain.handle(UPDATE_CHANNELS.check, (event) => { authorize(event); return getService()?.check(); });
+  ipcMain.handle(UPDATE_CHANNELS.ready, (event) => { authorize(event); return onApplicationReady?.(); });
   ipcMain.handle(UPDATE_CHANNELS.restart, async (event, locale) => {
     const window = authorize(event);
     if (installer) return installer.restart(locale);
@@ -184,5 +200,7 @@ export function registerUpdateBridge({ ipcMain, getWindow, isAppUrl, getService,
     };
     await dialog.showMessageBox(window, { type: "info", ...text });
   });
-  return () => { ipcMain.removeHandler(UPDATE_CHANNELS.get); ipcMain.removeHandler(UPDATE_CHANNELS.restart); };
+  return () => {
+    for (const channel of [UPDATE_CHANNELS.get, UPDATE_CHANNELS.restart, UPDATE_CHANNELS.check, UPDATE_CHANNELS.ready]) ipcMain.removeHandler(channel);
+  };
 }

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { test } from "node:test";
 import { resolveSystemNode, startProductionServer } from "./production.mjs";
 import { createRuntimeEnvironment } from "./runtime.mjs";
-import { createToolsetManifest } from "./toolsets.mjs";
+import { createToolsetManifest, ensureToolset } from "./toolsets.mjs";
 
 const runtime = resolve("resources/runtime/win-x64");
 
@@ -99,6 +99,8 @@ test("production uses the shared toolset PATH for bootstrap and Next, including 
   }
   const manifest = await createToolsetManifest(sourceRoot);
   await writeFile(join(resources, "desktop-toolset.json"), JSON.stringify(manifest));
+  // main 在启动前已解析（必要时迁移）共享工具；production 只要求该目录已就绪。
+  await ensureToolset({ sourceRoot, storeRoot: sharedRoot, manifest });
   const destination = join(sharedRoot, manifest.id);
   const mock = `
     import assert from 'node:assert/strict';
@@ -138,17 +140,17 @@ test("production uses the shared toolset PATH for bootstrap and Next, including 
     }});
     const {startProductionServer}=await import(${JSON.stringify(new URL("./production.mjs", import.meta.url).href)});
     const progress=[];
-    const options={resourcesPath:${JSON.stringify(resources)},toolsetsRoot:${JSON.stringify(sharedRoot)},logsPath:${JSON.stringify(join(temporary, "logs"))},url:'http://127.0.0.1:0',onToolProgress:event=>progress.push(event)};
+    const options={resourcesPath:${JSON.stringify(resources)},toolsetsRoot:${JSON.stringify(destination)},logsPath:${JSON.stringify(join(temporary, "logs"))},url:'http://127.0.0.1:0',onToolProgress:event=>progress.push(event)};
     const first=await startProductionServer(options);
     first.stop();
-    assert.equal(progress.at(-1).reused,false);
+    // main 已完成工具解析；production 不再重复复制或全校验。
+    assert.equal(progress.length,0);
     for(const file of ${JSON.stringify(manifest.files)})assert.deepEqual(await readFile(join(${JSON.stringify(destination)},file.path)),await readFile(join(${JSON.stringify(sourceRoot)},file.path)));
     await rm(${JSON.stringify(sourceRoot)},{recursive:true});
     progress.length=0;
     const second=await startProductionServer(options);
     second.stop();
-    assert.equal(progress.length,1);
-    assert.equal(progress[0].reused,true);
+    assert.equal(progress.length,0);
     assert.deepEqual(globalThis.toolsetSpawns,['bootstrap','next','bootstrap','next']);
   `;
   execFileSync(process.execPath, ["--input-type=module", "-e", script], { stdio: "pipe", timeout: 20_000 });

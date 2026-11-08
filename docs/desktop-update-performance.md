@@ -107,26 +107,59 @@ Evidence: ignored
 `build/desktop/update-acceptance/prepared-switch-2026-11-08T12-49-10.785Z-45987644/`
 (`summary.json`, `result.json`, helper sources and logs).
 
-## Remaining production work
+## Implemented fast-update channel (not yet released)
 
-1. Define and implement a separately signed application-package protocol:
-   application version, archive hash/size, platform, shell protocol/toolset
-   compatibility and prepared layout. Keep shell version distinct from active
-   application version. The existing B EXE verifier cannot consume this format.
-2. Implement bounded download/extraction and production-reviewed member/link/path
-   validation, cancellation, verified preparation receipts and visible preparation
-   progress. Do not expose a restart-ready action before preparation is complete.
-3. Integrate explicit apply with existing managed-task admission, the explicit
-   restart click (without a redundant confirmation), and real window-close/veto rules. Confirm owned server exit; commit selection
-   without copying/deleting old trees in the outage. Preserve port/profile.
-4. Define startup-failure recovery/previous-program selection and data migration
-   compatibility without claiming arbitrary data rollback. Normal exit must never
-   commit an update. Delay old-version/tool cleanup outside the restart path.
-5. Add real different-version Electron acceptance, followed by the user's VM
-   test with visible progress and timings. Keep public B and its assets intact;
-   no new version is published by this checkpoint.
+- **Signed server-only application packages.** `application-manifest.mjs` defines a
+  separate Ed25519-signed format binding application version, shell *content*
+  (digest) and toolset id, with bounded archive/layout metadata; the legacy EXE
+  verifier is unchanged. Compatibility deliberately ignores the shell version
+  string: a business release bumps the app version while the shell digest stays
+  the same, and any electron/startup/tool change changes the digest so the
+  package is rejected until a shell release. Business packages never carry Git.
+- **Background preparation.** `application-updates.mjs` downloads the signed
+  layout and ZIP with bounded size, redirect and timeout rules, verifies both by
+  SHA512, then calls `application-store.mjs` to inspect the ZIP listing with the
+  already shared `zipinfo.exe`/`unzip.exe`, extract into isolated staging, and
+  verify every file hash/size/count before publishing a version directory and
+  receipt. Progress is reported as download → extracting → verifying and the
+  restart action stays hidden until preparation is fully verified.
+- **Explicit switch with automatic recovery.** Clicking **Restart to update**
+  (single click; no second dialog) locks the task gate, re-verifies the prepared
+  version, closes the window normally, stops the owned Next process and waits for
+  it to exit, commits a per-profile selection pointer, then relaunches. Startup
+  treats a committed version as a trial: the renderer acknowledges health via
+  `applicationReady()`; a failed start or missing acknowledgement rolls back to
+  the previous program on the next launch. Selection pointers are per profile;
+  prepared version trees and toolset stay shared per user.
+- **Coordinator.** `update-coordinator.mjs` checks the legacy EXE channel first
+  (full shell maintenance wins, preview still surfaces) and otherwise the
+  application channel, pinning any ready result so late events from the other
+  source cannot overwrite it. `initializeUpdates` now returns this coordinator;
+  the legacy-only service remains for installs without a shell descriptor.
 
-Validation for the current foundation patch: 195 Electron tests, 193 passed and
-two file-symlink privilege skips; affected-file ESLint and independent read-only
-review passed. A custom-install store-overlap defect found in review was fixed
-and tested. No new production build, NSIS installer or release was generated.
+## Remaining work
+
+1. Real different-version acceptance: build a shell, install it, publish one
+   business package, verify background preparation while the old version stays
+   usable, then measure click → usable including Electron relaunch. Only then can
+   the ≤30 s target be claimed. The current prototype measured the backend switch
+   only.
+2. VM acceptance by the user, with visible preparation progress and timings.
+3. Publishing: `node electron/application-release.mjs --server <abs build/desktop/server>
+   --output <abs dir> --zip <abs 7za>` produces business artifacts locally but
+   does not upload. A business release needs those artifacts attached to
+   `desktop-v<version>`; shell releases keep the EXE path.
+4. Data migration compatibility and post-acknowledgement corruption recovery are
+   still only partially covered: rollback applies to the trial window.
+
+Validation for the foundation patch: 195 Electron tests, 193 passed and two
+file-symlink privilege skips; affected-file ESLint and independent read-only
+review passed. A custom-install store-overlap defect found in review was fixed.
+
+Validation for the channel increment: 327 Electron tests (325 passed, two
+file-symlink privilege skips), component tests, TypeScript and ESLint passed;
+an independent read-only review found three integration defects (shell maintenance
+suppressed by a version override, duplicate launch rolling back a healthy trial,
+commit ordering before server exit) plus a duplicated toolset resolution, all
+fixed and covered. No production build, NSIS installer, business package or
+release was generated, and public 0.1.12 is unchanged.

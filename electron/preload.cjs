@@ -10,4 +10,6 @@ contextBridge.exposeInMainWorld("weclioDesktop", Object.freeze({
     return () => ipcRenderer.removeListener("desktop-update:state", handler);
   },
   restartUpdate: (locale) => ipcRenderer.invoke("desktop-update:restart", locale),
+  applicationReady: () => ipcRenderer.invoke("desktop-update:ready"),
+  checkForUpdates: () => ipcRenderer.invoke("desktop-update:check"),
 }));

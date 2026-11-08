@@ -31,7 +31,7 @@ test("server dependencies have a dedicated resource mapping, including nested de
 });
 
 test("updater main modules and sandbox preload are packaged with optional fixed config", () => {
-  for (const name of ["preload.cjs", "updates.mjs", "update-signature.mjs", "update-install.mjs", "update-gate.mjs", "toolsets.mjs"]) assert.ok(config.files.includes(`electron/${name}`));
+  for (const name of ["preload.cjs", "updates.mjs", "update-signature.mjs", "update-install.mjs", "update-gate.mjs", "toolsets.mjs", "application-manifest.mjs", "application-store.mjs", "application-selection.mjs", "application-updates.mjs", "application-runtime.mjs", "update-coordinator.mjs"]) assert.ok(config.files.includes(`electron/${name}`));
   assert.deepEqual(config.extraResources.find((entry) => entry.from === "resources"), { from: "resources", to: ".", filter: ["desktop-update.json"] });
 });
 
@@ -54,6 +54,10 @@ test("server resources omit build tracing and source maps without losing runtime
 
 test("bootstrap installer ships a generated toolset descriptor separately from trust config", () => {
   assert.deepEqual(config.extraResources.find((entry) => entry.to === "desktop-toolset.json"), { from: "build/desktop/toolset.json", to: "desktop-toolset.json" });
+});
+
+test("bootstrap installer ships a generated shell descriptor so business packages can be matched", () => {
+  assert.deepEqual(config.extraResources.find((entry) => entry.to === "desktop-shell.json"), { from: "build/desktop/shell.json", to: "desktop-shell.json" });
 });
 
 test("production updater cache matches the installer cache instead of the development fallback", async () => {

@@ -30,6 +30,19 @@ npm run release:desktop -- --quick          # Reuse unchanged full build
 打包前手动准备最新版 Portable Git（含 Bash）、rg、fd 至 `resources/runtime/win-x64/`；已有可用工具无需更新。
 Windows x64; output `build/desktop/dist/`.
 EXE 未做 Windows 代码签名；更新清单使用 Ed25519 签名。私钥必须备份到仓库外。
+
+普通功能更新可只发业务包（不含 Git，需同一壳）:
+
+```bash
+npm run build:desktop
+node electron/application-release.mjs --server "%CD%\build\desktop\server" \
+  --output "%CD%\build\desktop\dist" \
+  --zip "%LOCALAPPDATA%\electron-builder\Cache\7zip@1.0.0\7zip-win-x64-a34pt\bin\7za.exe"
+# 可选 --shell <已部署壳的 desktop-shell.json>，默认用本次构建生成的壳描述符
+```
+
+该命令只在本地生成业务包、文件清单和签名清单，不上传；壳代码、Electron、
+preload、启动协议或工具变化必须改走完整安装包发布。
 Manual install/upgrade/uninstall acceptance. No commit, tag or upload (`--publish never`).
 Desktop release procedure: `docs/desktop-release.md`; use `desktop-v<version>` tags, not npm's `v*` tags.
 Node 22.19+ with npm required on user machines; Python/Pandoc/Office not bundled.

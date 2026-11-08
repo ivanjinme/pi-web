@@ -2307,6 +2307,18 @@ span.linenumber {
   color: var(--accent);
 }
 
+.desktop-update-downloading,
+.desktop-update-error {
+  font-size: 11px;
+}
+
+.desktop-update-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+}
+
 .desktop-update-button {
   border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
   border-radius: 6px;
