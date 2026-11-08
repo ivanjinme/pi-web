@@ -1,6 +1,6 @@
 const PERIOD = 4 * 60 * 60 * 1000;
 
-export function createUpdateCoordinator({ legacy, application, publish = () => {}, setTimer = setInterval, clearTimer = clearInterval, period = PERIOD }) {
+export function createUpdateCoordinator({ legacy, application, publish = () => {}, setTimer = setInterval, clearTimer = clearInterval, period = PERIOD, refresh, available = () => ({ legacy: true, application: true }) }) {
   const services = { legacy, application };
   const subscriptions = new Set();
   let state = { status: "idle" };
@@ -17,6 +17,7 @@ export function createUpdateCoordinator({ legacy, application, publish = () => {
     state = { ...next };
     publish({ ...state });
   };
+  const logRefresh = (error) => console.error("[desktop-update]", error?.message ?? error);
   const revoke = () => { ready = undefined; verified = undefined; };
 
   function receive(source, next) {
@@ -44,9 +45,19 @@ export function createUpdateCoordinator({ legacy, application, publish = () => {
 
   async function runCheck() {
     if (stopped || ready) return;
+    try { await refresh?.(); }
+    catch (error) {
+      if (stopped) return;
+      logRefresh(error);
+      change({ status: "error" });
+      return;
+    }
+    if (stopped) return;
+    const enabled = available();
+    if (!enabled.legacy && !enabled.application) { change({ status: "idle" }); return; }
     for (const source of ["legacy", "application"]) {
       const service = services[source];
-      if (!service) continue;
+      if (!service || !enabled[source]) continue;
       sourceChecking = source;
       try {
         await service.check();

@@ -6,6 +6,7 @@ import { isAbsolute, join } from "node:path";
 import { updateKey, updateUrl, verifyManifest } from "./update-signature.mjs";
 import { createApplicationUpdateService } from "./application-updates.mjs";
 import { createUpdateCoordinator } from "./update-coordinator.mjs";
+import { INDEX_NAME, releaseIndexUrl, verifyReleaseIndex } from "./release-index.mjs";
 
 export const UPDATE_CHANNELS = Object.freeze({ get: "desktop-update:get", state: "desktop-update:state", restart: "desktop-update:restart", check: "desktop-update:check", ready: "desktop-update:ready" });
 const PERIOD = 4 * 60 * 60 * 1000;
@@ -23,8 +24,7 @@ export async function loadUpdateConfig({ packaged, resourcesPath, env = process.
   return { manifestUrl: updateUrl(config.manifestUrl, devFixture), key: updateKey(config.publicKey), devFixture, updaterCacheDirName: cache };
 }
 
-export function createSignedProvider(Provider, config, signal) {
-  return class SignedProvider extends Provider {
+export function createSignedProvider(Provider, config, signal) {  return class SignedProvider extends Provider {
     // 与上游 GitHub provider 一致，使用对象存储兼容的单段 Range 请求。
     constructor(_options, _updater, runtime) { super({ ...runtime, isUseMultipleRangeRequest: false }); }
     async getLatestVersion() {
@@ -156,22 +156,63 @@ export async function initializeUpdates({ app, publish, log = console.error, app
   const { CancellationToken } = createRequire(require.resolve("electron-updater"))("builder-util-runtime");
   const abort = new AbortController();
   const installEnabled = app.isPackaged && !config.devFixture;
+  // 旧的 EXE 通道也用可变更的副本，发布索引刷新后只指向索引声明的清单。
+  const legacyConfig = { ...config };
+  const applicationConfig = { ...config, manifestUrl: null };
   const Updater = makeManagedUpdater(NsisUpdater, installEnabled, config.updaterCacheDirName);
-  const updater = new Updater({ provider: "custom", updateProvider: createSignedProvider(Provider, config, abort.signal) });
+  const updater = new Updater({ provider: "custom", updateProvider: createSignedProvider(Provider, legacyConfig, abort.signal) });
   updater.forceDevUpdateConfig = !app.isPackaged;
   const useApplication = installEnabled && applicationRuntime && typeof applyApplication === "function";
   if (!useApplication) return createUpdateService({ updater, token: new CancellationToken(), abort, publish, log, installEnabled });
+  // 发布索引是唯一的供给入口：它声明本次是壳更新、业务包，还是两者。
+  const indexUrl = releaseIndexUrl(config.manifestUrl, config.devFixture);
+  let availability = { legacy: true, application: false };
+  async function refreshFeeds() {
+    if (!indexUrl) throw new Error("Update feed must expose " + INDEX_NAME);
+    const index = await fetchReleaseIndex(indexUrl, config, abort.signal);
+    if (!index) { availability = { legacy: false, application: false }; return; }
+    legacyConfig.manifestUrl = index.installer ? new URL(index.installer.manifestUrl) : null;
+    applicationConfig.manifestUrl = index.application ? new URL(index.application.manifestUrl) : null;
+    availability = { legacy: Boolean(index.installer), application: Boolean(index.application) };
+  }
   // 不把业务包版本写进 updater：壳 EXE 的升级判断始终基于已安装壳，否则壳维护会被永久抑制。
   let coordinator;
   const legacy = createUpdateService({ updater, token: new CancellationToken(), abort, publish: (state) => coordinator?.receive("legacy", state), log, installEnabled });
   const application = createApplicationUpdateService({
-    config, shell: applicationRuntime.shell, selection: applicationRuntime.selection,
+    config: applicationConfig, shell: applicationRuntime.shell, selection: applicationRuntime.selection,
     storeRoot: applicationRuntime.storeRoot, toolsRoot: applicationRuntime.toolsRoot,
     toolsetManifest: applicationRuntime.toolsetManifest, apply: applyApplication,
     publish: (state) => coordinator?.receive("application", state), log, installEnabled,
   });
-  coordinator = createUpdateCoordinator({ legacy, application, publish });
+  coordinator = createUpdateCoordinator({ legacy, application, publish, refresh: refreshFeeds, available: () => availability });
   return coordinator;
+}
+
+async function fetchReleaseIndex(url, config, abortSignal) {
+  const signal = AbortSignal.any([abortSignal, AbortSignal.timeout(30_000)]);
+  let current = url;
+  for (let redirects = 0; ; redirects++) {
+    signal.throwIfAborted();
+    const response = await fetch(current, { redirect: "manual", signal });
+    if (![301, 302, 303, 307, 308].includes(response.status)) {
+      if (response.status === 404) { await response.body?.cancel(); return null; }
+      if (!response.ok) { await response.body?.cancel(); throw new Error(`Release index HTTP ${response.status}`); }
+      const chunks = [];
+      let size = 0;
+      for await (const chunk of response.body) {
+        signal.throwIfAborted();
+        size += chunk.length;
+        if (size > 128 * 1024) throw new Error("Release index too large");
+        chunks.push(chunk);
+      }
+      const envelope = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)));
+      return verifyReleaseIndex(envelope, config.key, config.devFixture);
+    }
+    const location = response.headers.get("location");
+    await response.body?.cancel();
+    if (!location || redirects >= 5) throw new Error("Invalid release index redirect");
+    current = updateUrl(new URL(location, current).href, config.devFixture);
+  }
 }
 
 export function registerUpdateBridge({ ipcMain, getWindow, isAppUrl, getService, dialog, installer, onApplicationReady }) {

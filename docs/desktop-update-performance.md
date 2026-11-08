@@ -131,11 +131,14 @@ Evidence: ignored
   `applicationReady()`; a failed start or missing acknowledgement rolls back to
   the previous program on the next launch. Selection pointers are per profile;
   prepared version trees and toolset stay shared per user.
-- **Coordinator.** `update-coordinator.mjs` checks the legacy EXE channel first
-  (full shell maintenance wins, preview still surfaces) and otherwise the
-  application channel, pinning any ready result so late events from the other
-  source cannot overwrite it. `initializeUpdates` now returns this coordinator;
-  the legacy-only service remains for installs without a shell descriptor.
+- **Coordinator and single index.** `release-index.mjs` defines one signed
+  document declaring whether this release carries a shell installer, a business
+  package, or both. `update-coordinator.mjs` refreshes the index before each
+  check, skips channels the index does not advertise, checks the shell channel
+  first, and pins any ready result so late events cannot overwrite it. An index
+  404 means no update; a failed refresh surfaces an error instead of reusing
+  stale URLs. `initializeUpdates` returns this coordinator; installs without a
+  shell descriptor keep the legacy-only service.
 
 ## Remaining work
 
@@ -145,10 +148,12 @@ Evidence: ignored
    the ≤30 s target be claimed. The current prototype measured the backend switch
    only.
 2. VM acceptance by the user, with visible preparation progress and timings.
-3. Publishing: `node electron/application-release.mjs --server <abs build/desktop/server>
-   --output <abs dir> --zip <abs 7za>` produces business artifacts locally but
-   does not upload. A business release needs those artifacts attached to
-   `desktop-v<version>`; shell releases keep the EXE path.
+3. Publishing is computed, not chosen: `npm run release:desktop` (shell) and
+   `npm run release:desktop:app` (business) both sign one
+   `desktop-release-index.json`, refuse the wrong kind by comparing the shell
+   digest with `electron/desktop-shell-baseline.json`, and never upload. Clients
+   read only the index from Latest, which can point at manifests on older
+   release tags.
 4. Data migration compatibility and post-acknowledgement corruption recovery are
    still only partially covered: rollback applies to the trial window.
 

@@ -9,6 +9,8 @@ import nodeVersion from "../bin/node-version.js";
 import { prepareSignedUpdate, readReleaseSigning } from "./update-release.mjs";
 import { createToolsetManifest } from "./toolsets.mjs";
 import { createShellDescriptor } from "./application-release.mjs";
+import { buildReleaseIndex } from "./release-index.mjs";
+import { readShellBaseline, writeShellBaseline } from "./release-baseline.mjs";
 export { validateInstaller } from "./update-release.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -118,7 +120,18 @@ async function main() {
     await run(process.execPath, [builder, "--config", "electron/builder.json", "--win", "--x64", "--publish", "never", "--config.directories.output", output]);
     if (await fingerprint(root) !== initial || await fingerprintPackaging(root) !== packagingFingerprint || await fingerprint(root, ["build/desktop/toolset.json", "build/desktop/shell.json"]) !== generatedFingerprint || saved.server !== await fingerprint(server, [".next", "node_modules", "package.json", "next.config.js", "desktop-packages.mjs", "public", "LICENSE"])) throw new Error("打包过程中源文件或构建产物变化，请重新执行。");
     const result = await retainDesktopRelease({ output, dist, version, signing });
-    console.log(`\n安装包: ${result.installerPath}\n差异文件: ${result.blockmapPath}\n签名清单: ${result.manifestPath}\nSHA256: ${result.sha256}\n更新清单已作 Ed25519 签名；EXE 未做 Windows 代码签名。验收后手动发布 desktop-v${version}，本命令不会上传。`);
+    // 壳命令必须对应一次壳变化；否则应发业务包，不能不知不觉发全量包。
+    const currentShell = JSON.parse(await readFile(join(root, "build/desktop/shell.json"), "utf8"));
+    const baseline = await readShellBaseline({ root });
+    if (baseline && baseline.digest === currentShell.digest && baseline.toolset === currentShell.toolset) {
+      throw new Error("壳内容未变化：请用 npm run release:desktop:app 发布业务包");
+    }
+    const index = buildReleaseIndex({ version, shell: currentShell, installer: { version }, application: null, signing });
+    const indexPath = join(dist, "desktop-release-index.json");
+    await rm(indexPath, { force: true });
+    await writeFile(indexPath, JSON.stringify(index, null, 2) + "\n");
+    await writeShellBaseline({ root, shell: currentShell });
+    console.log(`\n安装包: ${result.installerPath}\n差异文件: ${result.blockmapPath}\n签名清单: ${result.manifestPath}\n发布索引: ${indexPath}\n壳基线: electron/desktop-shell-baseline.json（需提交）\nSHA256: ${result.sha256}\n本命令不会上传。`);
   } finally {
     await rm(output, { recursive: true, force: true, maxRetries: 3 });
   }

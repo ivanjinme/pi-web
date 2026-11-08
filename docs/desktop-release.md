@@ -30,16 +30,25 @@ npm run setup:desktop-updates
 
 ## 生成发布产物
 
-先确定代码与依赖已稳定、版本为正式版，再执行：
+发布类型由脚本计算，不靠人工判断：比较本次 `build/desktop/shell.json` 的壳摘要与
+`electron/desktop-shell-baseline.json`。摘要变了 → 壳；没变且应用版本更高 → 业务包。
+两条命令都会签名同一份 `desktop-release-index.json`，客户端只读这份索引。
 
 ```powershell
 npm version patch --no-git-tag-version
-npm run release:desktop
-# 仅生产服务输入完全没变时，可以复用服务构建：
-npm run release:desktop -- --quick
+npm run release:desktop        # 壳：Electron、main/preload、启动协议、工具、信任配置
+npm run release:desktop:app    # 业务包：仅应用代码变化，不含 Git
 ```
 
-脚本会预检版本、私钥与公钥，运行 Electron 测试，在 `build/desktop/server/` 构建服务并生成 NSIS 安装包，不改开发 `.next/`。`--quick` 只省略未变化的服务构建，**仍会打包安装器**；版本或依赖变更通常需要完整构建。
+壳命令在摘要未变时会直接报错，业务包命令在摘要已变时会直接报错，避免误发。
+壳发布会重写 `electron/desktop-shell-baseline.json`，必须随该版本提交。
+
+壳命令会预检版本、私钥与公钥，运行 Electron 测试，在 `build/desktop/server/`
+构建服务并生成 NSIS 安装包与发布索引，不改开发 `.next/`。
+`--quick` 只省略未变化的服务构建，仍会打包安装器。
+
+业务包命令重新构建服务、打包不含 Git 的应用 ZIP，并生成索引；它不改壳版本。
+若任一 `electron/`、启动或工具文件发生变化，客户端会拒绝业务包，因此命令会提前失败。
 
 构建还生成 `build/desktop/toolset.json`（工具清单及内容摘要，随 bootstrap 安装器放为 `resources/desktop-toolset.json`）与 `build/desktop/shell.json`（壳版本、壳指纹和工具 ID，放为 `resources/desktop-shell.json`）。两者都不是供用户下载的附件。首次启动复制并验证工具到安装目录外的本用户 toolsets；有壳描述符的安装会检查已签名业务包是否与当前壳兼容，并用每 profile 的选择指针决定启动哪份服务。旧安装无描述符时保持原行为。
 
@@ -47,12 +56,17 @@ npm run release:desktop -- --quick
 
 | 文件 | 用途 |
 | --- | --- |
-| `Weclio-<版本>-x64-Setup.exe` | 完整安装包 |
-| 同名 `.exe.blockmap` | 差异下载侧文件，必须与本次 EXE 配套 |
-| `desktop-update-manifest.json` | Ed25519 签名清单，包含正式版本、`installable: true`、EXE 地址／大小／SHA512 |
-| `SHA256SUMS.txt` | 上述三个文件的 SHA256 |
+| `desktop-release-index.json` | **唯一入口**：Ed25519 签名，声明本次是壳、业务包或两者 |
+| `Weclio-<版本>-x64-Setup.exe` + `.blockmap` | 壳发布：完整安装包与差异侧文件 |
+| `desktop-update-manifest.json` | 壳发布：绑定 EXE 的签名清单 |
+| `SHA256SUMS.txt` | 壳发布：上述文件摘要 |
+| `Weclio-<版本>-x64-Application.zip` | 业务包：服务端资源归档 |
+| `Weclio-<版本>-x64-Application.files.json` | 业务包：逐文件清单 |
+| `desktop-application-manifest.json` | 业务包：绑定归档的签名清单 |
 
-清单中的安装包地址固定指向该版本的 `desktop-v<版本>` release。客户端通过正式 Latest release 获取清单，验证后下载。旧正式版 EXE/blockmap 应保留且不覆盖；缺少旧 blockmap 时客户端可回退全量下载。
+索引中的清单地址固定指向各自的 `desktop-v<版本>` release。客户端只从正式 Latest
+读取索引，再按索引去下载对应清单；因此业务包发布时 Latest 不再出现安装包，需要新装的
+用户请指向最新的壳发布。旧正式版 EXE/blockmap 应保留且不覆盖。
 
 脚本先验证本次新输出再替换 dist，保留 EXE 和 blockmap，最后更新签名清单。构建／打包前后检查源码、生产服务、桌面模块、公钥配置、内置 Git/工具和 Node 版本辅助脚本是否改变。验证失败时不要上传残留产物。
 

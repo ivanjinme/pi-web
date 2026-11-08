@@ -21,6 +21,7 @@
     "electron/application-selection.mjs",
     "electron/application-updates.mjs",
     "electron/application-runtime.mjs",
+    "electron/release-index.mjs",
     "electron/update-coordinator.mjs",
     "electron/server.mjs",
     "bin/node-version.js",
@@ -35,12 +36,28 @@
     {
       "from": "resources",
       "to": ".",
-      "filter": ["desktop-update.json"]
+      "filter": [
+        "desktop-update.json"
+      ]
     },
     {
       "from": "build/desktop/server",
       "to": "server",
-      "filter": ["package.json", "next.config.js", "desktop-packages.mjs", "LICENSE", "public/**/*", ".next/**/*", "!.next/cache/**/*", "!.next/**/*.nft.json", "!.next/**/*.js.map", "!.next/**/*.mjs.map", "!.next/**/*.cjs.map", "!.next/trace", "!.next/trace-build"]
+      "filter": [
+        "package.json",
+        "next.config.js",
+        "desktop-packages.mjs",
+        "LICENSE",
+        "public/**/*",
+        ".next/**/*",
+        "!.next/cache/**/*",
+        "!.next/**/*.nft.json",
+        "!.next/**/*.js.map",
+        "!.next/**/*.mjs.map",
+        "!.next/**/*.cjs.map",
+        "!.next/trace",
+        "!.next/trace-build"
+      ]
     },
     {
       "from": "build/desktop/server/node_modules",
@@ -57,7 +74,10 @@
     {
       "from": "resources/runtime/win-x64",
       "to": "runtime/win-x64",
-      "filter": ["git/**/*", "tools/**/*"]
+      "filter": [
+        "git/**/*",
+        "tools/**/*"
+      ]
     }
   ],
   "electronDist": "node_modules/electron/dist",
@@ -65,7 +85,14 @@
   "npmRebuild": false,
   "publish": null,
   "win": {
-    "target": [{ "target": "nsis", "arch": ["x64"] }],
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
     "icon": "public/brand/weclio-favicon.ico",
     "signAndEditExecutable": false,
     "artifactName": "Weclio-${version}-${arch}-Setup.${ext}"

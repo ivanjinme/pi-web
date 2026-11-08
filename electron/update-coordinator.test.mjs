@@ -419,3 +419,53 @@ test("unexpected check rejection exposes an error and does not poison later chec
   await h.coordinator.check();
   assert.deepEqual(h.coordinator.getState(), downloaded("2.0.0", "application"));
 });
+
+test("release index availability skips the shell channel and checks only the application channel", async (t) => {
+  const states = [];
+  const checked = [];
+  const services = (source) => ({
+    getState: () => ({ status: "idle" }),
+    check: async () => { checked.push(source); },
+    canInstall: () => false,
+    verifyForInstall: async () => {},
+    onInstallError: () => () => {},
+    quitAndInstall: async () => {},
+    stop: () => {},
+  });
+  const coordinator = createUpdateCoordinator({
+    legacy: services("legacy"), application: services("application"),
+    publish: (state) => states.push(state),
+    refresh: async () => {},
+    available: () => ({ legacy: false, application: true }),
+  });
+  t.after(() => coordinator.stop());
+  await coordinator.check();
+  assert.deepEqual(checked, ["application"], "an index without an installer must skip the shell channel");
+});
+
+test("release index with no sections ends idle without touching either channel", async (t) => {
+  const checked = [];
+  const coordinator = createUpdateCoordinator({
+    legacy: { getState: () => ({ status: "idle" }), check: async () => { checked.push("legacy"); }, canInstall: () => false, verifyForInstall: async () => {}, onInstallError: () => () => {}, quitAndInstall: async () => {}, stop: () => {} },
+    application: { getState: () => ({ status: "idle" }), check: async () => { checked.push("application"); }, canInstall: () => false, verifyForInstall: async () => {}, onInstallError: () => () => {}, quitAndInstall: async () => {}, stop: () => {} },
+    refresh: async () => {},
+    available: () => ({ legacy: false, application: false }),
+  });
+  t.after(() => coordinator.stop());
+  await coordinator.check();
+  assert.deepEqual(checked, []);
+  assert.deepEqual(coordinator.getState(), { status: "idle" });
+});
+
+test("a failed index refresh surfaces an error and never falls back to stale feeds", async (t) => {
+  const checked = [];
+  const coordinator = createUpdateCoordinator({
+    legacy: { getState: () => ({ status: "idle" }), check: async () => { checked.push("legacy"); }, canInstall: () => false, verifyForInstall: async () => {}, onInstallError: () => () => {}, quitAndInstall: async () => {}, stop: () => {} },
+    application: { getState: () => ({ status: "idle" }), check: async () => { checked.push("application"); }, canInstall: () => false, verifyForInstall: async () => {}, onInstallError: () => () => {}, quitAndInstall: async () => {}, stop: () => {} },
+    refresh: async () => { throw new Error("Release index HTTP 500"); },
+  });
+  t.after(() => coordinator.stop());
+  await coordinator.check();
+  assert.deepEqual(checked, [], "an unverified index must not reuse previously resolved URLs");
+  assert.deepEqual(coordinator.getState(), { status: "error" });
+});

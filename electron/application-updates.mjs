@@ -41,7 +41,8 @@ async function canonicalDirectory(location) {
 }
 
 export function createApplicationUpdateService({ config, shell, selection, storeRoot, toolsRoot, toolsetManifest, apply, publish = () => {}, log = console.error, installEnabled = false, fetch = globalThis.fetch, readPrepared = readPreparedApplication, prepare = prepareApplication }) {
-  const manifestUrl = applicationManifestUrl(config?.manifestUrl instanceof URL ? config.manifestUrl.href : config?.manifestUrl, config?.devFixture);
+  // 供给索引会改写清单地址；每次检查时重新解析，不在构造时锁定。
+  const manifestUrl = () => applicationManifestUrl(config?.manifestUrl instanceof URL ? config.manifestUrl.href : config?.manifestUrl, config?.devFixture);
   const abort = new AbortController();
   let state = { status: "idle" };
   let stopped = false;
@@ -78,8 +79,9 @@ export function createApplicationUpdateService({ config, shell, selection, store
   };
 
   async function manifest() {
+    const url = manifestUrl();
     const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]);
-    const response = await request(manifestUrl, { fetch, signal, devFixture: config.devFixture });
+    const response = await request(url, { fetch, signal, devFixture: config.devFixture });
     if (response.status === 404) { await response.body?.cancel(); return null; }
     if (!response.ok) { await response.body?.cancel(); throw new Error(`Application manifest HTTP ${response.status}`); }
     const chunks = [];
@@ -179,7 +181,7 @@ export function createApplicationUpdateService({ config, shell, selection, store
 
   const canInstall = () => installEnabled && !stopped && !!ready && state.status === "downloaded";
   function check() {
-    if (stopped || ready || !manifestUrl) return Promise.resolve();
+    if (stopped || ready || !manifestUrl()) return Promise.resolve();
     if (!checking) checking = Promise.resolve().then(runCheck).finally(() => { checking = undefined; });
     return checking;
   }
