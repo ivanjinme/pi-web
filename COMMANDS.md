@@ -18,46 +18,54 @@ One Next dev server per directory, regardless of port.
 
 Never run `next build` during development; it pollutes `.next/`.
 
-## Windows desktop package
+## Windows desktop
+
+Once: install Portable Git (with Bash), rg, fd in `resources/runtime/win-x64/`; create the
+signing key outside the repo with `npm run setup:desktop-updates`. Back it up.
+
+Shell installer — Electron, main/preload, startup protocol, tools, or any first migration:
 
 ```bash
-npm run setup:desktop-updates               # Initialize/check external signing key + public config
-npm version <version> --no-git-tag-version  # Shared Web/desktop stable version
-npm run release:desktop                     # Test, build, EXE + blockmap + signed manifest + SHA256
-npm run release:desktop -- --quick          # Reuse unchanged full build
+npm version 0.1.13 --no-git-tag-version   # stable; shared with npm
+npm run release:desktop                   # tests, Next build, NSIS, signed manifest
+npm run release:desktop -- --quick        # version-only change; reuses the Next build
 ```
 
-打包前手动准备最新版 Portable Git（含 Bash）、rg、fd 至 `resources/runtime/win-x64/`；已有可用工具无需更新。
-Windows x64; output `build/desktop/dist/`.
-EXE 未做 Windows 代码签名；更新清单使用 Ed25519 签名。私钥必须备份到仓库外。
+Output `build/desktop/dist/`: EXE, `.blockmap`, `desktop-update-manifest.json`,
+`SHA256SUMS.txt`. Build also generates `toolset.json`/`shell.json`, bundled as
+`resources/desktop-toolset.json`/`desktop-shell.json`. Never commits, tags, uploads
+or installs. Ed25519 signs the manifest; the EXE is not Authenticode-signed.
 
-普通功能更新可只发业务包（不含 Git，需同一壳）:
+Business package — ordinary feature update, no Git, requires the deployed shell:
 
 ```bash
 npm run build:desktop
 node electron/application-release.mjs --server "%CD%\build\desktop\server" \
   --output "%CD%\build\desktop\dist" \
   --zip "%LOCALAPPDATA%\electron-builder\Cache\7zip@1.0.0\7zip-win-x64-a34pt\bin\7za.exe"
-# 可选 --shell <已部署壳的 desktop-shell.json>，默认用本次构建生成的壳描述符
 ```
 
-该命令只在本地生成业务包、文件清单和签名清单，不上传；壳代码、Electron、
-preload、启动协议或工具变化必须改走完整安装包发布。
-Manual install/upgrade/uninstall acceptance. No commit, tag or upload (`--publish never`).
-Desktop release procedure: `docs/desktop-release.md`; use `desktop-v<version>` tags, not npm's `v*` tags.
-Node 22.19+ with npm required on user machines; Python/Pandoc/Office not bundled.
+Valid only while the shell digest and toolset are unchanged (`--shell` selects the
+deployed descriptor; default is this build's). Anything else is a shell release.
+Local only; no upload.
+
+Users need Node 22.19+ with npm. Python/Pandoc/Office are not bundled.
 
 ## Publish
+
+npm — tag `v*` triggers `.github/workflows/publish.yml` (webpack build). Never run
+`npm run release` for this flow:
 
 ```bash
 npm version patch --no-git-tag-version
 VERSION=$(node -p "require('./package.json').version")
-git add package.json package-lock.json
-git commit -m "Release v$VERSION"
-git tag "v$VERSION"
-git push origin main "v$VERSION"
+git add package.json package-lock.json && git commit -m "Release v$VERSION"
+git tag "v$VERSION" && git push origin main "v$VERSION"
 ```
 
-Source of truth: `.github/workflows/publish.yml`. Its `npm run build` uses webpack
-(`next build --webpack`) so server externals remain publishable. Never run
-`npm run release` for the normal publish flow.
+Desktop — tag `desktop-v<version>`, never `v*`. After `release:desktop`, recompute
+SHA256 with `Get-FileHash -Algorithm SHA256` and compare `SHA256SUMS.txt`, then
+`gh release create --draft` → attach → `gh release edit --latest`. Latest drives both
+EXE and business-package discovery; a business release carries no EXE, so keep the
+shell installer in its notes. Never `--clobber` a public release — bump the version.
+npm publishing is unrelated to desktop updates. Full procedure: `docs/desktop-release.md`.
