@@ -93,6 +93,27 @@ test("scheduler runs once on ready, deduplicates downloads and retains downloade
   assert.equal(h.updater.listenerCount("error"), 0);
 });
 
+test("installer progress is published only during download and listeners are released on stop", async () => {
+  let finish;
+  const h = harness({ downloadUpdate() { return new Promise((resolve) => { finish = resolve; }); } });
+  h.updater.emit("download-progress", { percent: 10 });
+  assert.deepEqual(h.service.getState(), { status: "idle" });
+  h.service.start();
+  await flush();
+  h.updater.emit("download-progress", { percent: 45.6 });
+  assert.deepEqual(h.service.getState(), { status: "downloading", version: info.version, progress: 45.6 });
+  h.updater.emit("download-progress", { percent: NaN });
+  assert.equal(h.service.getState().progress, 45.6);
+  h.updater.emit("download-progress", { percent: 110 });
+  assert.equal(h.service.getState().progress, 100);
+  finish(["verified.exe"]);
+  await flush();
+  h.updater.emit("download-progress", { percent: 1 });
+  assert.deepEqual(h.service.getState(), { status: "downloaded", version: info.version });
+  h.service.stop();
+  assert.equal(h.updater.listenerCount("download-progress"), 0);
+});
+
 test("check/download failures and no-update return hidden idle; next cycle retries", async () => {
   for (const overrides of [
     { async checkForUpdates() { throw new Error("bad signature"); } },
@@ -160,6 +181,20 @@ test("config absent is inert, absolute dev opt-in only, packaged ignores env and
   await assert.rejects(loadUpdateConfig({ packaged: true, resourcesPath: root }), /Unsafe/);
 });
 
+test("packaged configuration is passed directly to the signed installer provider", async (t) => {
+  const resourcesPath = new URL("../resources/", import.meta.url);
+  const { fileURLToPath } = await import("node:url");
+  const config = await loadUpdateConfig({ packaged: true, resourcesPath: fileURLToPath(resourcesPath) });
+  const requested = [];
+  t.mock.method(globalThis, "fetch", async (url) => {
+    requested.push(String(url));
+    return new Response(null, { status: 404 });
+  });
+  const Custom = createSignedProvider(Provider, config, new AbortController().signal);
+  await assert.rejects(new Custom({}, {}, {}).getLatestVersion(), /Manifest HTTP 404/);
+  assert.deepEqual(requested, ["https://github.com/ivanjinme/pi-web/releases/latest/download/desktop-update-manifest.json"]);
+});
+
 test("configured updater cache is a single safe directory name", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "weclio-update-cache-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -186,8 +221,8 @@ test("IPC restricts owning window, app origin and main frame; restart is explana
   assert.deepEqual(prompts[0][1].buttons, ["知道了"]);
   // 未注入服务或缺窗口时也不能向任意页面暴露新的更新操作。
   assert.equal(await handlers.get(UPDATE_CHANNELS.check)(event), undefined);
-  assert.equal(await handlers.get(UPDATE_CHANNELS.ready)(event), undefined);
-  for (const channel of [UPDATE_CHANNELS.check, UPDATE_CHANNELS.ready]) assert.throws(() => handlers.get(channel)({ ...event, sender: {} }), /Untrusted/);
+  assert.equal(handlers.has("desktop-update:ready"), false);
+  assert.throws(() => handlers.get(UPDATE_CHANNELS.check)({ ...event, sender: {} }), /Untrusted/);
   for (const locale of ["en", "unsupported", undefined]) {
     await handlers.get(UPDATE_CHANNELS.restart)(event, locale);
     const prompt = prompts.at(-1)[1];
@@ -201,11 +236,10 @@ test("sandbox preload exposes only named methods and listener unsubscribe", asyn
   let api; const listeners = new Map(); const invoked = [];
   const ipcRenderer = { invoke: (channel, ...args) => { invoked.push([channel, ...args]); return Promise.resolve({ status: "idle" }); }, on: (name, fn) => listeners.set(name, fn), removeListener: (name, fn) => { assert.equal(listeners.get(name), fn); listeners.delete(name); } };
   runInNewContext(await readFile(new URL("./preload.cjs", import.meta.url), "utf8"), { require: (name) => { assert.equal(name, "electron"); return { ipcRenderer, contextBridge: { exposeInMainWorld(name, value) { assert.equal(name, "weclioDesktop"); api = value; } } }; } });
-  assert.deepEqual(Object.keys(api), ["getUpdateState", "onUpdateState", "restartUpdate", "applicationReady", "checkForUpdates"]);
-  assert.equal(typeof api.applicationReady, "function");
+  assert.deepEqual(Object.keys(api), ["getUpdateState", "onUpdateState", "restartUpdate", "checkForUpdates"]);
   assert.equal(typeof api.checkForUpdates, "function");
-  await api.getUpdateState(); await api.restartUpdate("zh-CN"); await api.applicationReady(); await api.checkForUpdates();
-  assert.deepEqual(invoked, [[UPDATE_CHANNELS.get], [UPDATE_CHANNELS.restart, "zh-CN"], [UPDATE_CHANNELS.ready], [UPDATE_CHANNELS.check]]);
+  await api.getUpdateState(); await api.restartUpdate("zh-CN"); await api.checkForUpdates();
+  assert.deepEqual(invoked, [[UPDATE_CHANNELS.get], [UPDATE_CHANNELS.restart, "zh-CN"], [UPDATE_CHANNELS.check]]);
   let received; const unsubscribe = api.onUpdateState((state) => { received = state; });
   listeners.get(UPDATE_CHANNELS.state)({ secret: true }, { status: "downloaded" }); assert.deepEqual(received, { status: "downloaded" }); unsubscribe(); assert.equal(listeners.size, 0);
 });

@@ -51,7 +51,7 @@ test("a clean checkout does not require or fingerprint generated next-env.d.ts",
 
 test("packaging fingerprint covers the shipped runtime, trust config, shell and Node helper", async (t) => {
   const dir = await fixture(t);
-  const files = ["electron/main.mjs", "electron/builder.json", "resources/desktop-update.json", "resources/runtime/win-x64/git/bin/bash.exe", "resources/runtime/win-x64/tools/rg.exe", "bin/node-version.js"];
+  const files = ["electron/main.mjs", "electron/builder.json", "resources/desktop-update.json", "resources/runtime/win-x64/tools/rg.exe", "bin/node-version.js"];
   for (const file of files) {
     await mkdir(dirname(join(dir, file)), { recursive: true });
     await writeFile(join(dir, file), "first");
@@ -65,6 +65,18 @@ test("packaging fingerprint covers the shipped runtime, trust config, shell and 
   }
   await writeFile(join(dir, "resources/runtime/win-x64/unused.txt"), "not packaged");
   assert.equal(await fingerprintPackaging(dir), initial);
+});
+
+test("installer releases need no shell baseline, business package, or shell descriptor", async () => {
+  const release = await readFile(new URL("./release.mjs", import.meta.url), "utf8");
+  const build = await readFile(new URL("./build.mjs", import.meta.url), "utf8");
+  for (const source of [release, build]) {
+    assert.doesNotMatch(source, /application-[\w-]+\.mjs|release-baseline\.mjs|release-index\.mjs|installer-index|desktop-release-index|createShellDescriptor|desktop-shell-baseline\.json|build\/desktop\/shell\.json|release:desktop:app/);
+  }
+  assert.match(release, /"--publish", "never"/);
+  const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(pkg.scripts["release:desktop"], "node electron/release.mjs");
+  assert.equal(pkg.scripts["release:desktop:app"], undefined);
 });
 
 test("installer validation checks PE signature and computes SHA256", async (t) => {

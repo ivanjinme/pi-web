@@ -16,31 +16,29 @@ Never run `next build` during development; it pollutes `.next/`.
 
 ## Publish desktop
 
-Release kind is computed, never chosen by hand. Both commands sign one
-`desktop-release-index.json` and refuse to run when the shell digest moved the
-wrong way.
+One desktop release command builds the complete installer update; there is no
+independent business ZIP/npm update, shell-digest release-kind gate or shell
+baseline to commit.
 
 ```bash
 npm run setup:desktop-updates    # once; signing key lives outside the repo
-npm run release:desktop          # shell: Electron, main/preload, startup, tools, trust config
-npm run release:desktop:app      # business package: application code only
+npm run release:desktop          # tests, isolated Next build, NSIS, signed metadata
 ```
 
-Upload the printed artifacts to `desktop-v<version>` and make it Latest; the index
-is the only document clients read. `release:desktop` also rewrites
-`electron/desktop-shell-baseline.json` — commit it with that release. Never
-`--clobber` a public release; bump the version instead.
+Clients read the signed `desktop-update-manifest.json` directly. No legacy
+index or compatibility adapter is generated.
 
-```bash
-v=$(node -p "require('./package.json').version")
-gh release create "desktop-v$v" --draft --target HEAD --title "Weclio desktop $v" \
-  --notes "Desktop app update." build/desktop/dist/*
-gh release edit "desktop-v$v" --draft=false --latest
-```
+The command uses `--publish never`: no commit, tag, upload, install or Latest
+change. Public upload/Latest changes require explicit approval. Before any upload,
+ensure the build matches the committed source/target commit. Upload only the
+explicit current-version EXE, paired blockmap, signed manifest and
+`SHA256SUMS.txt` listed in `docs/desktop-release.md`. Never use a dist
+wildcard: old ZIPs/installers may remain. Never `--clobber` public assets; bump the
+version instead. Ed25519 metadata signing is not Windows Authenticode signing.
 
-Details: `docs/desktop-release.md`.
+Details and controlled validation limits: `docs/desktop-release.md`.
 
-## Publish npm
+## Publish npm (web/CLI distribution, not desktop updating)
 
 ```bash
 npm version patch --no-git-tag-version

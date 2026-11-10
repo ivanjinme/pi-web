@@ -4,11 +4,8 @@ import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { isAbsolute, join } from "node:path";
 import { updateKey, updateUrl, verifyManifest } from "./update-signature.mjs";
-import { createApplicationUpdateService } from "./application-updates.mjs";
-import { createUpdateCoordinator } from "./update-coordinator.mjs";
-import { INDEX_NAME, releaseIndexUrl, verifyReleaseIndex } from "./release-index.mjs";
 
-export const UPDATE_CHANNELS = Object.freeze({ get: "desktop-update:get", state: "desktop-update:state", restart: "desktop-update:restart", check: "desktop-update:check", ready: "desktop-update:ready" });
+export const UPDATE_CHANNELS = Object.freeze({ get: "desktop-update:get", state: "desktop-update:state", restart: "desktop-update:restart", check: "desktop-update:check" });
 const PERIOD = 4 * 60 * 60 * 1000;
 
 export async function loadUpdateConfig({ packaged, resourcesPath, env = process.env }) {
@@ -87,6 +84,12 @@ export function createUpdateService({ updater, token, abort = new AbortControlle
   updater.disableDifferentialDownload = false;
   const onError = (error) => log("[desktop-update]", error.message);
   updater.on("error", onError);
+  const onProgress = ({ percent }) => {
+    if (state.status === "downloading" && Number.isFinite(percent)) {
+      change({ ...state, progress: Math.min(100, Math.max(0, percent)) });
+    }
+  };
+  updater.on("download-progress", onProgress);
   async function check() {
     if (stopped || busy || state.status === "downloaded") return;
     busy = true;
@@ -142,11 +145,11 @@ export function createUpdateService({ updater, token, abort = new AbortControlle
     },
     start() { if (!stopped && !timer) { timer = setTimer(() => void check(), PERIOD); timer?.unref?.(); void check(); } },
     check,
-    stop() { stopped = true; if (timer) clearTimer(timer); abort.abort(); token.cancel(); updater.removeListener("error", onError); },
+    stop() { stopped = true; if (timer) clearTimer(timer); abort.abort(); token.cancel(); updater.removeListener("error", onError); updater.removeListener("download-progress", onProgress); },
   };
 }
 
-export async function initializeUpdates({ app, publish, log = console.error, applicationRuntime, applyApplication }) {
+export async function initializeUpdates({ app, publish, log = console.error }) {
   const config = await loadUpdateConfig({ packaged: app.isPackaged, resourcesPath: process.resourcesPath });
   if (!config || process.platform !== "win32") return null;
   // 复用 server 的生产依赖，不向小型 ASAR 再复制一棵 node_modules。
@@ -156,66 +159,13 @@ export async function initializeUpdates({ app, publish, log = console.error, app
   const { CancellationToken } = createRequire(require.resolve("electron-updater"))("builder-util-runtime");
   const abort = new AbortController();
   const installEnabled = app.isPackaged && !config.devFixture;
-  // 旧的 EXE 通道也用可变更的副本，发布索引刷新后只指向索引声明的清单。
-  const legacyConfig = { ...config };
-  const applicationConfig = { ...config, manifestUrl: null };
   const Updater = makeManagedUpdater(NsisUpdater, installEnabled, config.updaterCacheDirName);
-  const updater = new Updater({ provider: "custom", updateProvider: createSignedProvider(Provider, legacyConfig, abort.signal) });
+  const updater = new Updater({ provider: "custom", updateProvider: createSignedProvider(Provider, config, abort.signal) });
   updater.forceDevUpdateConfig = !app.isPackaged;
-  const useApplication = installEnabled && applicationRuntime && typeof applyApplication === "function";
-  if (!useApplication) return createUpdateService({ updater, token: new CancellationToken(), abort, publish, log, installEnabled });
-  // 发布索引是唯一的供给入口：它声明本次是壳更新、业务包，还是两者。
-  const indexUrl = releaseIndexUrl(config.manifestUrl, config.devFixture);
-  let availability = { legacy: true, application: false };
-  async function refreshFeeds() {
-    if (!indexUrl) throw new Error("Update feed must expose " + INDEX_NAME);
-    const index = await fetchReleaseIndex(indexUrl, config, abort.signal);
-    if (!index) { availability = { legacy: false, application: false }; return; }
-    legacyConfig.manifestUrl = index.installer ? new URL(index.installer.manifestUrl) : null;
-    applicationConfig.manifestUrl = index.application ? new URL(index.application.manifestUrl) : null;
-    availability = { legacy: Boolean(index.installer), application: Boolean(index.application) };
-  }
-  // 不把业务包版本写进 updater：壳 EXE 的升级判断始终基于已安装壳，否则壳维护会被永久抑制。
-  let coordinator;
-  const legacy = createUpdateService({ updater, token: new CancellationToken(), abort, publish: (state) => coordinator?.receive("legacy", state), log, installEnabled });
-  const application = createApplicationUpdateService({
-    config: applicationConfig, shell: applicationRuntime.shell, selection: applicationRuntime.selection,
-    storeRoot: applicationRuntime.storeRoot, toolsRoot: applicationRuntime.toolsRoot,
-    toolsetManifest: applicationRuntime.toolsetManifest, apply: applyApplication,
-    publish: (state) => coordinator?.receive("application", state), log, installEnabled,
-  });
-  coordinator = createUpdateCoordinator({ legacy, application, publish, refresh: refreshFeeds, available: () => availability });
-  return coordinator;
+  return createUpdateService({ updater, token: new CancellationToken(), abort, publish, log, installEnabled });
 }
 
-async function fetchReleaseIndex(url, config, abortSignal) {
-  const signal = AbortSignal.any([abortSignal, AbortSignal.timeout(30_000)]);
-  let current = url;
-  for (let redirects = 0; ; redirects++) {
-    signal.throwIfAborted();
-    const response = await fetch(current, { redirect: "manual", signal });
-    if (![301, 302, 303, 307, 308].includes(response.status)) {
-      if (response.status === 404) { await response.body?.cancel(); return null; }
-      if (!response.ok) { await response.body?.cancel(); throw new Error(`Release index HTTP ${response.status}`); }
-      const chunks = [];
-      let size = 0;
-      for await (const chunk of response.body) {
-        signal.throwIfAborted();
-        size += chunk.length;
-        if (size > 128 * 1024) throw new Error("Release index too large");
-        chunks.push(chunk);
-      }
-      const envelope = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)));
-      return verifyReleaseIndex(envelope, config.key, config.devFixture);
-    }
-    const location = response.headers.get("location");
-    await response.body?.cancel();
-    if (!location || redirects >= 5) throw new Error("Invalid release index redirect");
-    current = updateUrl(new URL(location, current).href, config.devFixture);
-  }
-}
-
-export function registerUpdateBridge({ ipcMain, getWindow, isAppUrl, getService, dialog, installer, onApplicationReady }) {
+export function registerUpdateBridge({ ipcMain, getWindow, isAppUrl, getService, dialog, installer }) {
   function authorize(event) {
     const window = getWindow();
     if (!window || window.isDestroyed() || event.sender !== window.webContents ||
@@ -224,7 +174,6 @@ export function registerUpdateBridge({ ipcMain, getWindow, isAppUrl, getService,
   }
   ipcMain.handle(UPDATE_CHANNELS.get, (event) => { authorize(event); return getService()?.getState() ?? { status: "idle" }; });
   ipcMain.handle(UPDATE_CHANNELS.check, (event) => { authorize(event); return getService()?.check(); });
-  ipcMain.handle(UPDATE_CHANNELS.ready, (event) => { authorize(event); return onApplicationReady?.(); });
   ipcMain.handle(UPDATE_CHANNELS.restart, async (event, locale) => {
     const window = authorize(event);
     if (installer) return installer.restart(locale);
@@ -242,6 +191,6 @@ export function registerUpdateBridge({ ipcMain, getWindow, isAppUrl, getService,
     await dialog.showMessageBox(window, { type: "info", ...text });
   });
   return () => {
-    for (const channel of [UPDATE_CHANNELS.get, UPDATE_CHANNELS.restart, UPDATE_CHANNELS.check, UPDATE_CHANNELS.ready]) ipcMain.removeHandler(channel);
+    for (const channel of [UPDATE_CHANNELS.get, UPDATE_CHANNELS.restart, UPDATE_CHANNELS.check]) ipcMain.removeHandler(channel);
   };
 }

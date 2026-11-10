@@ -43,7 +43,7 @@ test("unsupported Node versions and missing npm are rejected before launching th
 test("production initializes bundled packages before Next and never initializes against an occupied port", async (t) => {
   const resources = await mkdtemp(join(tmpdir(), "weclio-bootstrap-order-"));
   t.after(() => rm(resources, { recursive: true, force: true }));
-  for (const file of ["server/.next/BUILD_ID", "runtime/win-x64/git/bin/bash.exe", "runtime/win-x64/git/cmd/git.exe", "runtime/win-x64/tools/rg.exe", "runtime/win-x64/tools/fd.exe"]) {
+  for (const file of ["server/.next/BUILD_ID", "runtime/win-x64/tools/rg.exe", "runtime/win-x64/tools/fd.exe"]) {
     await mkdir(dirname(join(resources, file)), { recursive: true });
     await writeFile(join(resources, file), "fixture");
   }
@@ -93,7 +93,7 @@ test("production uses the shared toolset PATH for bootstrap and Next, including 
   const resources = join(temporary, "installation", "resources");
   const sourceRoot = join(resources, "runtime", "win-x64");
   const sharedRoot = join(temporary, "toolsets");
-  for (const file of ["server/.next/BUILD_ID", "server/node_modules/next/dist/bin/next", "runtime/win-x64/git/bin/bash.exe", "runtime/win-x64/git/cmd/git.exe", "runtime/win-x64/tools/rg.exe", "runtime/win-x64/tools/fd.exe"]) {
+  for (const file of ["server/.next/BUILD_ID", "server/node_modules/next/dist/bin/next", "runtime/win-x64/tools/rg.exe", "runtime/win-x64/tools/fd.exe"]) {
     await mkdir(dirname(join(resources, file)), { recursive: true });
     await writeFile(join(resources, file), `fixture:${file}`);
   }
@@ -108,7 +108,7 @@ test("production uses the shared toolset PATH for bootstrap and Next, including 
     import {win32} from 'node:path';
     export function spawn(command,args,options) {
       const entries=options.env.PATH.split(';');
-      for(const suffix of [['git','cmd'],['git','bin'],['tools']]) {
+      for(const suffix of [['tools']]) {
         assert.ok(entries.includes(win32.join(${JSON.stringify(destination)},...suffix)), 'Shared tool missing from child PATH');
         assert.ok(!entries.includes(win32.join(${JSON.stringify(sourceRoot)},...suffix)), 'Legacy tool tree leaked into child PATH');
       }
@@ -159,7 +159,7 @@ test("production uses the shared toolset PATH for bootstrap and Next, including 
 test("cancelling first startup terminates its initializer before returning", async (t) => {
   const resources = await mkdtemp(join(tmpdir(), "weclio-cancel-bootstrap-"));
   t.after(() => rm(resources, { recursive: true, force: true }));
-  for (const file of ["server/.next/BUILD_ID", "runtime/win-x64/git/bin/bash.exe", "runtime/win-x64/git/cmd/git.exe", "runtime/win-x64/tools/rg.exe", "runtime/win-x64/tools/fd.exe"]) {
+  for (const file of ["server/.next/BUILD_ID", "runtime/win-x64/tools/rg.exe", "runtime/win-x64/tools/fd.exe"]) {
     await mkdir(dirname(join(resources, file)), { recursive: true });
     await writeFile(join(resources, file), "fixture");
   }
@@ -183,7 +183,7 @@ test("cancelling first startup terminates its initializer before returning", asy
 test("only the Next child owns update IPC and unexpected exits still surface", async (t) => {
   const resources = await mkdtemp(join(tmpdir(), "weclio-production-ipc-"));
   t.after(() => rm(resources, { recursive: true, force: true }));
-  for (const file of ["server/.next/BUILD_ID", "server/node_modules/next/dist/bin/next", "runtime/win-x64/git/bin/bash.exe", "runtime/win-x64/git/cmd/git.exe", "runtime/win-x64/tools/rg.exe", "runtime/win-x64/tools/fd.exe"]) {
+  for (const file of ["server/.next/BUILD_ID", "server/node_modules/next/dist/bin/next", "runtime/win-x64/tools/rg.exe", "runtime/win-x64/tools/fd.exe"]) {
     await mkdir(dirname(join(resources, file)), { recursive: true });
     await writeFile(join(resources, file), "fixture");
   }
@@ -233,8 +233,8 @@ test("only the Next child owns update IPC and unexpected exits still surface", a
   execFileSync(process.execPath, ["--input-type=module", "-e", script], { stdio: "pipe", timeout: 20_000 });
 });
 
-test("with no system Git, Pi discovers bundled Bash, rg and fd through only the child PATH", {
-  skip: process.platform !== "win32" || !existsSync(join(runtime, "git/bin/bash.exe")),
+test("rg and fd stay discoverable through the child PATH while Bash now comes from the user's Git", {
+  skip: process.platform !== "win32",
 }, async (t) => {
   const agent = await mkdtemp(join(tmpdir(), "weclio-runtime-agent-"));
   t.after(() => rm(agent, { recursive: true, force: true }));
@@ -248,15 +248,13 @@ test("with no system Git, Pi discovers bundled Bash, rg and fd through only the 
   const env = createRuntimeEnvironment(runtime, base);
   const script = `
     import assert from 'node:assert/strict';
-    import { execFileSync } from 'node:child_process';
     import { getShellConfig } from '@earendil-works/pi-coding-agent';
     const { getToolPath } = await import(${JSON.stringify(new URL("../node_modules/@earendil-works/pi-coding-agent/dist/utils/tools-manager.js", import.meta.url).href)});
-    const shell = getShellConfig();
-    assert.equal(shell.shell.toLowerCase(), ${JSON.stringify(join(runtime, "git/bin/bash.exe").toLowerCase())});
+    // 壳不再随包 Git：子进程 PATH 上只多出 tools 目录，rg/fd 仍按名字直接解析。
     assert.equal(getToolPath('rg'), 'rg');
     assert.equal(getToolPath('fd'), 'fd');
-    const output=execFileSync(shell.shell,[...shell.args,'git --version && rg --version && fd --version'],{encoding:'utf8',windowsHide:true});
-    assert.match(output,/git version/); assert.match(output,/ripgrep/); assert.match(output,/fd /);
+    // 没有系统 Git 时必须给出可读的前置条件错误，而不是静默换用别的 shell。
+    assert.throws(() => getShellConfig(), /Git for Windows/);
   `;
   execFileSync(process.execPath, ["--input-type=module", "-e", script], { env, stdio: "pipe", timeout: 30000 });
 });

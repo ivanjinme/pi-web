@@ -6,7 +6,10 @@ Local web UI for the [pi coding agent](https://github.com/badlogic/pi-mono). Cha
 
 ## Quick Start
 
-Requires Node.js 22.19+.
+Requires Node.js 22.19+. The desktop app additionally requires Git for Windows
+(see [docs/desktop-install.md](./docs/desktop-install.md)). Desktop updates use one
+background-downloaded installer with an explicit restart, not an independent
+business ZIP or npm update. The npm commands below are for the web/CLI distribution.
 
 ```bash
 npx @weclio/pi-web@latest

@@ -147,7 +147,12 @@ function assertIdle(session) {
 async function assertDownloaded(session) {
   await session.service.check();
   assert.deepEqual(session.service.getState(), { status: "downloaded", version: "0.2.0" });
-  assert.deepEqual(session.states.map((state) => state.status), ["checking", "downloading", "downloaded"]);
+  const transitions = session.states.map((state) => state.status).filter((status, index, states) => index === 0 || status !== states[index - 1]);
+  assert.deepEqual(transitions, ["checking", "downloading", "downloaded"]);
+  for (const state of session.states.filter((state) => state.progress !== undefined)) {
+    assert.equal(state.status, "downloading");
+    assert.ok(Number.isFinite(state.progress) && state.progress >= 0 && state.progress <= 100);
+  }
   assert.deepEqual(session.errors, []);
   assert.equal(session.downloaded.length, 1);
   const path = session.downloaded[0];

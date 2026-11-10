@@ -1,6 +1,6 @@
 {
   "name": "@weclio/pi-web",
-  "version": "0.1.13",
+  "version": "0.1.20",
   "description": "Web UI for the pi coding agent",
   "homepage": "https://github.com/ivanjinme/pi-web#readme",
   "repository": {
@@ -42,8 +42,7 @@
     "start": "next start -H 127.0.0.1 -p 8888",
     "start:lan": "next start -H 0.0.0.0 -p 8888",
     "lint": "eslint .",
-    "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public",
-    "release:desktop:app": "node electron/release-app.mjs"
+    "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public"
   },
   "dependencies": {
     "@codemirror/commands": "6.11.1",

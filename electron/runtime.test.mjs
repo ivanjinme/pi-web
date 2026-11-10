@@ -10,7 +10,7 @@ test("bundled tools are appended without changing the parent environment or user
   const result = createRuntimeEnvironment(root, env, "win32");
   assert.deepEqual(env, before);
   assert.equal(result.Path, undefined);
-  assert.deepEqual(result.PATH.split(";"), ["C:\\Node", "C:\\ExistingGit\\cmd", `${root}\\git\\cmd`, `${root}\\git\\bin`, `${root}\\tools`]);
+  assert.deepEqual(result.PATH.split(";"), ["C:\\Node", "C:\\ExistingGit\\cmd", `${root}\\tools`]);
   assert.equal(result.PI_CODING_AGENT_DIR, env.PI_CODING_AGENT_DIR);
   assert.equal(result.HOME, env.HOME);
   assert.equal(result.WECLIO_BASH_PATH, undefined);

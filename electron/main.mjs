@@ -1,15 +1,42 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { initializeUpdates, registerUpdateBridge, UPDATE_CHANNELS } from "./updates.mjs";
 import { createUpdateInstaller } from "./update-install.mjs";
 import { SERVER_URL, isAppUrl, isExternalUrl, isPermissionAllowed, restoreDesktopPort } from "./navigation.mjs";
 import { startProductionServer } from "./production.mjs";
 import { assertPortAvailable } from "./server.mjs";
-import { createApplicationRuntime } from "./application-runtime.mjs";
 import { resolveDesktopTools } from "./toolsets.mjs";
 
 app.setName("Weclio");
-// 同一 profile 只允许一个实例；并发启动会让“试用未确认”被误判为崩溃回退。
+
+// 主进程错误必须落盘：Windows 上 GUI 进程没有终端可看 stderr，
+// 否则「启动失败 / 更新失败」只能靠猜（2026-11-09 就因为这一点无法定位）。
+function installMainLog() {
+  try {
+    const directory = app.getPath("logs");
+    mkdirSync(directory, { recursive: true });
+    const file = join(directory, "main.log");
+    try {
+      if (statSync(file).size > 2 * 1024 * 1024) renameSync(file, join(directory, "main.1.log"));
+    } catch {}
+    const original = console.error.bind(console);
+    console.error = (...args) => {
+      original(...args);
+      const line = args.map((value) => (value instanceof Error ? (value.stack ?? value.message) : String(value))).join(" ");
+      try {
+        appendFileSync(file, `${new Date().toISOString()} ${line}
+`);
+      } catch {}
+    };
+    return true;
+  } catch {
+    return false;
+  }
+}
+if (!installMainLog()) app.whenReady().then(() => installMainLog());
+// 同一 profile 只允许一个实例，避免并发服务争用端口与用户数据。
 const holdsSingleInstance = app.requestSingleInstanceLock();
 if (!holdsSingleInstance) {
   app.quit();
@@ -25,36 +52,6 @@ let service = null;
 let quitting = false;
 const startup = new AbortController();
 let updates = null;
-let applicationRuntime = null;
-let healthTimer;
-// 健康确认前切到新版只是试用；确认失败要能回到旧程序。
-function trialCandidate() {
-  try { return applicationRuntime?.selection.needsHealthAcknowledgement() === true; }
-  catch { return false; }
-}
-function cancelHealthTimer() { clearTimeout(healthTimer); healthTimer = undefined; }
-async function acknowledgeApplication() {
-  if (!trialCandidate()) return;
-  cancelHealthTimer();
-  await applicationRuntime.selection.healthy();
-  console.log("[desktop] 新版已确认可用。");
-}
-async function applyApplication(id) {
-  // 先确认自有服务退出，再提交选择；任一步失败都保持指针不变。
-  await service.stopAndWait();
-  service = null;
-  try {
-    await applicationRuntime.selection.commit(id);
-  } catch (error) {
-    // 服务已停且无法提交：重启后仍是旧版本，不能留一个空白窗口。
-    console.error("[desktop] 无法提交出新版选择:", error.message);
-    app.relaunch();
-    app.exit(1);
-    return;
-  }
-  app.relaunch();
-  app.exit(0);
-}
 const installer = createUpdateInstaller({
   app, dialog, getService: () => updates, getWindow: () => mainWindow, getGate: () => service?.updateGate,
   restoreWindow: async () => {
@@ -64,7 +61,7 @@ const installer = createUpdateInstaller({
     }
   },
 });
-const removeUpdateBridge = registerUpdateBridge({ ipcMain, getWindow: () => mainWindow, isAppUrl, getService: () => updates, dialog, installer, onApplicationReady: acknowledgeApplication });
+const removeUpdateBridge = registerUpdateBridge({ ipcMain, getWindow: () => mainWindow, isAppUrl, getService: () => updates, dialog, installer });
 
 function showError(message) {
   service?.stop();
@@ -82,7 +79,6 @@ app.on("before-quit", (event) => {
 app.on("will-quit", () => {
   console.log("[desktop] 正在退出。");
   quitting = true;
-  cancelHealthTimer();
   service?.stop();
   startup.abort();
   installer.dispose();
@@ -211,15 +207,6 @@ if (holdsSingleInstance) app.whenReady().then(async () => {
       void window.webContents.executeJavaScript(`document.querySelector('main p')?.replaceChildren(document.createTextNode(${JSON.stringify(text)}))`).catch((error) => console.error("[desktop] 无法显示工具准备进度:", error.message));
     };
     const toolsRoot = await resolveDesktopTools({ resourcesPath: process.resourcesPath, storeBase: toolsetsBase, signal: startup.signal, onProgress: onToolProgress });
-    applicationRuntime = await createApplicationRuntime({
-      resourcesPath: process.resourcesPath,
-      localAppData: toolsetsBase,
-      profilePath: app.getPath("userData"),
-      shellVersion: app.getVersion(),
-      toolsRoot,
-    });
-    // 选择存于当前 profile；上次试用未确认会先回到旧程序。
-    const active = applicationRuntime ? await applicationRuntime.selection.begin() : null;
     service = await startProductionServer({
       resourcesPath: process.resourcesPath,
       logsPath: app.getPath("logs"),
@@ -227,40 +214,20 @@ if (holdsSingleInstance) app.whenReady().then(async () => {
       signal: startup.signal,
       toolsetsRoot: toolsRoot,
       toolsetsBase,
-      serverRoot: active?.serverRoot,
-      readyTimeout: trialCandidate() ? 60_000 : undefined,
       onToolProgress,
       onUnexpectedExit: (error) => showError(error.message),
     });
-    if (trialCandidate()) {
-      // 页面一直健康不了也不能永久卡住：下次启动自动回退旧程序。
-      healthTimer = setTimeout(() => {
-        console.error("[desktop] 新版未能确认可用，下次启动将回退。");
-        void applicationRuntime.selection.rollback().catch((error) => console.error("[desktop] 无法记录回退:", error.message));
-      }, 90_000);
-      healthTimer.unref?.();
-    }
   }
   if (!quitting) {
     await window.loadURL(SERVER_URL);
     // 页面就绪后再启动后台检查，不阻塞首屏；缺少配置时保持静默。
-    void initializeUpdates({ app, applicationRuntime, applyApplication, publish: (state) => {
+    void initializeUpdates({ app, publish: (state) => {
       if (mainWindow && !mainWindow.isDestroyed() && isAppUrl(mainWindow.webContents.getURL())) mainWindow.webContents.send(UPDATE_CHANNELS.state, state);
     } }).then((service) => {
       if (quitting) service?.stop();
       else { updates = service; updates?.start(); }
     }).catch((error) => console.error("[desktop-update]", error.message));
   }
-}).catch(async (error) => {
-  if (quitting) return;
-  // 试用新版启动失败：立即回退并重启，不让用户反复撞同一错误。
-  if (trialCandidate()) {
-    try {
-      await applicationRuntime.selection.rollback();
-      app.relaunch();
-      app.exit(1);
-      return;
-    } catch (rollbackError) { console.error("[desktop] 无法回退新版:", rollbackError.message); }
-  }
-  showError(error.message);
+}).catch((error) => {
+  if (!quitting) showError(error.message);
 });

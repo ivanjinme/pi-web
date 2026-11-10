@@ -51,3 +51,5 @@ next-env.d.ts
 # pi project-local npm dependencies and temporary files
 /.pi/npm/
 /.pi/tmp/
+# 本地续作笔记，不入库
+docs/desktop-update-handoff.md

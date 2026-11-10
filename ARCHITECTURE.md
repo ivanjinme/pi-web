@@ -40,17 +40,27 @@ Browser                Next.js Server              AgentSession (in-process)
 
 ## Desktop runtime boundary
 
-- Packaged Next still runs under the user's system Node/npm, outside ASAR.
-- Descriptor-bearing bootstrap installations prepare verified Git/Bash/rg/fd in
-  a content-addressed, per-user store outside the installation directory.
-  `electron/toolsets.mjs` owns migration, cache reuse and canonical path checks;
-  it does not check online Git releases. The installer still carries seed tools.
-- Background application-package preparation / fast version selection is now a
-  production channel in source (signed server-only packages prepared outside the
-  installation, then a short switch), but it has not passed real different-version
-  acceptance. See `docs/desktop-update-performance.md` for measured prototype
-  boundaries and remaining work; do not equate backend HTTP readiness with
-  completed Electron update acceptance.
+- Electron hosts the desktop; packaged Next runs under the user's system
+  Node.js 22.19+/npm, outside ASAR. Git for Windows (including Git Bash) is a
+  user-installed prerequisite, not a bundled runtime.
+- The installer bundles rg/fd seed tools. `electron/toolsets.mjs` prepares and
+  reuses their verified content-addressed per-user cache outside the installation
+  directory, with canonical path checks. Source-map/deployment-trace trimming
+  remains part of packaging.
+- There is one desktop update: an NSIS EXE plus blockmap, downloaded in the
+  background through `electron-updater` using an Ed25519-signed
+  `desktop-update-manifest.json`. New clients read that manifest directly;
+  there is no independent business ZIP/npm update, application slot selection,
+  trial-health acknowledgement or automatic rollback channel.
+- Release tooling emits only installer update metadata; there is no legacy index,
+  compatibility adapter, shell-digest release-kind gate or committed shell baseline.
+- Installation still requires the explicit restart action, the managed-task gate
+  and normal window-close approval. Ordinary exit does not install. Differential
+  download has full-download fallback; successful real Windows VM differential
+  transfer remains unvalidated. Neither a ≤30-second restart nor post-exit
+  recovery/health-based rollback is promised. Ed25519 is not Authenticode signing.
+  Current release guidance is in `docs/desktop-release.md`; performance/stage
+  documents preserve historical evidence, not the current architecture.
 
 ## Session Boundaries
 

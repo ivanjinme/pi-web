@@ -44,7 +44,7 @@ export class BrowserWindow extends EventEmitter {
 }
 `;
 
-function runMain(check, platform = process.platform, packaged = false, pending = false, setup = "", runtimeSource, fail = false) {
+function runMain(check, platform = process.platform, packaged = false, pending = false, setup = "", fail = false) {
   const mockUrl = `data:text/javascript,${encodeURIComponent(mock)}`;
   const productionUrl = `data:text/javascript,${encodeURIComponent(`
     import assert from 'node:assert/strict';
@@ -57,15 +57,11 @@ function runMain(check, platform = process.platform, packaged = false, pending =
       starts.push(options);
       if (${fail}) throw new Error('candidate startup failed');
       if (${pending}) await new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(Error('startup cancelled')),{once:true}));
-      return { stop() { stops++; }, stopAndWait: async () => { stops++; } };
+      return { stop() { stops++; } };
     }
   `)}`;
   const toolsUrl = `data:text/javascript,${encodeURIComponent(`
     export async function resolveDesktopTools() { return 'test-shared-tools'; }
-  `)}`;
-  // 没有壳描述符的安装保持旧行为；main 仍应传入已解析的独立工具目录。
-  const runtimeUrl = `data:text/javascript,${encodeURIComponent(runtimeSource ?? `
-    export async function createApplicationRuntime() { return null; }
   `)}`;
   const script = `
     import assert from 'node:assert/strict';
@@ -77,7 +73,6 @@ function runMain(check, platform = process.platform, packaged = false, pending =
       // 真实端口探测在单测中会绑定本机端口，这里只验证调用顺序。
       if (specifier === './server.mjs') return { url: 'data:text/javascript,export async function assertPortAvailable(){globalThis.portChecks=(globalThis.portChecks??0)+1;}export async function waitForServer(){}', shortCircuit: true };
       if (${packaged} && specifier === './toolsets.mjs') return { url: ${JSON.stringify(toolsUrl)}, shortCircuit: true };
-      if (${packaged} && specifier === './application-runtime.mjs') return { url: ${JSON.stringify(runtimeUrl)}, shortCircuit: true };
       return next(specifier, context);
     }});
     const { app, BrowserWindow, dialog, shell } = await import('electron');
@@ -206,7 +201,7 @@ test("shared tools are profile-independent and startup progress is throttled", (
       assert.notEqual(production.starts[0].toolsetsBase, profile);
     }
     assert.equal(production.starts[0].toolsetsRoot, 'test-shared-tools');
-    assert.equal(production.starts[0].serverRoot, undefined, 'legacy installs launch the bundled server');
+    assert.equal(production.starts[0].serverRoot, undefined, 'all installs launch their bundled server');
     assert.equal(production.starts[0].readyTimeout, undefined);
     const now = Date.now;
     Date.now = () => 1000;
@@ -223,48 +218,32 @@ test("shared tools are profile-independent and startup progress is throttled", (
   `, 'win32', true);
 });
 
-test("prepared application launches as a bounded trial and stays uncommitted", () => {
-  const id = "a".repeat(64);
-  const runtime = `
-    export async function createApplicationRuntime() {
-      return { selection: {
-        getCurrent() { return { id: null, version: '0.1.12', serverRoot: 'bundled' }; },
-        async begin() { return { id: '${id}', version: '0.1.13', serverRoot: 'C:/prepared/server' }; },
-        needsHealthAcknowledgement() { return true; },
-        async healthy() { globalThis.__healthy = true; },
-        async rollback() { globalThis.__rolled = true; },
-        async commit() { throw new Error('startup must not commit'); },
-      } };
-    }
-  `;
+test("stale business-package pointers and descriptors are ignored without deleting user data", () => {
   runMain(`
-    assert.equal(production.starts[0].serverRoot, 'C:/prepared/server');
-    assert.equal(production.starts[0].readyTimeout, 60000, 'trial candidates get a bounded startup window');
-    assert.equal(globalThis.__healthy, undefined, 'health is acknowledged only by the renderer');
-    assert.equal(globalThis.__rolled, undefined);
-  `, 'win32', true, false, '', runtime);
+    assert.equal(production.starts.length, 1);
+    assert.equal(production.starts[0].serverRoot, undefined);
+    assert.equal(readFileSync(pointer, 'utf8'), 'obsolete pointer');
+    assert.equal(readFileSync(descriptor, 'utf8'), 'obsolete descriptor');
+    assert.equal(app.relaunches, 0);
+    assert.deepEqual(dialog.errors, []);
+  `, 'win32', true, false, `
+    const { mkdirSync, writeFileSync, readFileSync } = await import('node:fs');
+    const selection = join(profile, 'application-selection');
+    mkdirSync(selection);
+    const pointer = join(selection, 'current.json');
+    const descriptor = join(profile, 'desktop-shell.json');
+    writeFileSync(pointer, 'obsolete pointer');
+    writeFileSync(descriptor, 'obsolete descriptor');
+    process.resourcesPath = profile;
+  `);
 });
 
-test("failed trial launch rolls back and restarts instead of trapping the user", () => {
-  const id = "b".repeat(64);
-  const runtime = `
-    export async function createApplicationRuntime() {
-      return { selection: {
-        getCurrent() { return { id: null, version: '0.1.12', serverRoot: 'bundled' }; },
-        async begin() { return { id: '${id}', version: '0.1.13', serverRoot: 'C:/prepared/server' }; },
-        needsHealthAcknowledgement() { return true; },
-        async healthy() {},
-        async rollback() { globalThis.__rolled = true; },
-        async commit() {},
-      } };
-    }
-  `;
+test("bundled startup failure reports once without a business-package relaunch loop", () => {
   runMain(`
-    assert.equal(globalThis.__rolled, true, 'failed candidate must be rolled back');
-    assert.equal(app.relaunches, 1);
+    assert.equal(app.relaunches, 0);
     assert.deepEqual(app.exits, [1]);
-    assert.deepEqual(dialog.errors, [], 'automatic recovery happens before any blocking dialog');
-  `, 'win32', true, false, '', runtime, true);
+    assert.match(dialog.errors[0][1], /candidate startup failed/);
+  `, 'win32', true, false, '', true);
 });
 
 test("packaged startup restores its remembered port before loading or authorizing the window", () => {

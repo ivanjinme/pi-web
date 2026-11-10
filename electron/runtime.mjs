@@ -11,7 +11,7 @@ export function createRuntimeEnvironment(runtimeRoot, env = process.env, platfor
     delete result[key];
   }
   // 保留原有查找顺序，包内工具只兜底；Windows 环境中只保留一个 PATH 键。
-  entries.push(win32.join(runtimeRoot, "git", "cmd"), win32.join(runtimeRoot, "git", "bin"), win32.join(runtimeRoot, "tools"));
+  entries.push(win32.join(runtimeRoot, "tools"));
   const seen = new Set();
   result.PATH = entries.filter((entry) => {
     if (!entry || seen.has(entry.toLowerCase())) return false;

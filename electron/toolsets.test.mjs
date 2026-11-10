@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { createToolsetManifest, ensureToolset, resolveDesktopTools } from "./toolsets.mjs";
 
-const REQUIRED = ["git/bin/bash.exe", "git/cmd/git.exe", "tools/rg.exe", "tools/fd.exe"];
+const REQUIRED = ["tools/rg.exe", "tools/fd.exe"];
 const RECEIPT = ".desktop-toolset-complete.json";
 
 async function fixture(t, installation = "installation") {
@@ -15,7 +15,7 @@ async function fixture(t, installation = "installation") {
   const resourcesPath = path.join(root, installation, "resources");
   const sourceRoot = path.join(resourcesPath, "runtime", "win-x64");
   const storeRoot = path.join(root, "shared");
-  for (const name of [...REQUIRED, "git/etc/config"]) {
+  for (const name of [...REQUIRED, "tools/etc/config"]) {
     const filename = path.join(sourceRoot, name);
     await mkdir(path.dirname(filename), { recursive: true });
     await writeFile(filename, `fixture:${name}`);
@@ -41,10 +41,10 @@ async function linkOrSkip(t, target, filename, type) {
   }
 }
 
-test("manifest includes only regular git/tools files with portable, sorted, content-addressed entries", async (t) => {
+test("manifest includes only regular tools files with portable, sorted, content-addressed entries", async (t) => {
   const f = await fixture(t);
   assert.equal(f.manifest.schema, 1);
-  assert.deepEqual(f.manifest.files.map((file) => file.path), [...REQUIRED, "git/etc/config"].sort());
+  assert.deepEqual(f.manifest.files.map((file) => file.path), [...REQUIRED, "tools/etc/config"].sort());
   for (const file of f.manifest.files) {
     const content = await readFile(path.join(f.sourceRoot, file.path));
     assert.equal(file.size, content.length);
@@ -78,7 +78,7 @@ test("warm reuse needs neither source nor a recursive scan of optional files", a
   const f = await fixture(t);
   const destination = await ensureToolset(f);
   await rm(f.sourceRoot, { recursive: true });
-  await rm(path.join(destination, "git", "etc"), { recursive: true });
+  await rm(path.join(destination, "tools", "etc"), { recursive: true });
   const progress = [];
   assert.equal(await ensureToolset({ ...f, onProgress: (event) => progress.push(event) }), destination);
   assert.equal(progress.length, 1);
@@ -91,7 +91,7 @@ test("manifest validation rejects unsafe paths, aliases, duplicates, absent bina
     const manifest = signed([...f.manifest.files, { ...f.manifest.files[0], path: unsafe }]);
     await assert.rejects(ensureToolset({ ...f, manifest }), /Invalid/);
   }
-  for (const extra of ["TOOLS/fd.exe", "tools/FD.exe", "git/Bin/extra", "git/bin/bash.exe/child"]) {
+  for (const extra of ["TOOLS/fd.exe", "tools/FD.exe", "Tools/rg.exe", "tools/RG.exe/child"]) {
     await assert.rejects(ensureToolset({ ...f, manifest: signed([...f.manifest.files, { ...f.manifest.files[0], path: extra }]) }));
   }
   await assert.rejects(ensureToolset({ ...f, manifest: signed([...f.manifest.files, f.manifest.files[0]]) }), /duplicate/);
@@ -116,8 +116,9 @@ test("manifest creation rejects linked files", async (t) => {
 
 test("manifest creation rejects linked directories", async (t) => {
   const f = await fixture(t);
-  const linked = path.join(f.sourceRoot, "git", "linked");
-  if (!await linkOrSkip(t, path.join(f.sourceRoot, "tools"), linked, "junction")) return;
+  await mkdir(path.join(f.sourceRoot, "tools", "sub"), { recursive: true });
+  const linked = path.join(f.sourceRoot, "tools", "linked");
+  if (!await linkOrSkip(t, path.join(f.sourceRoot, "tools", "sub"), linked, "junction")) return;
   await assert.rejects(createToolsetManifest(f.sourceRoot), /Linked/);
 });
 

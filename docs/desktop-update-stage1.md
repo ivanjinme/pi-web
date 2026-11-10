@@ -1,5 +1,13 @@
 # Desktop update: stage 1 (download only)
 
+> **Historical stage-1 record, not current operating instructions.** Current
+> desktop updates use one EXE/blockmap channel, background download, the task gate
+> and explicit restart; new clients read the signed manifest directly. See
+> `desktop-release.md` for current release/compatibility guidance. Synthetic
+> fixtures below remain download-only and must never be installed. Historical
+> artifacts/tests are not proof of current Windows VM differential-download
+> acceptance or a ≤30-second restart/automatic rollback guarantee.
+
 Stage-1 development/test sources remain download-only. Their button only displays
 a native explanation; closing the app never installs a download. Stage-2
 production handoff is documented separately in `desktop-update-stage2.md` and

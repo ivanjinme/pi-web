@@ -16,13 +16,6 @@
     "electron/production.mjs",
     "electron/runtime.mjs",
     "electron/toolsets.mjs",
-    "electron/application-manifest.mjs",
-    "electron/application-store.mjs",
-    "electron/application-selection.mjs",
-    "electron/application-updates.mjs",
-    "electron/application-runtime.mjs",
-    "electron/release-index.mjs",
-    "electron/update-coordinator.mjs",
     "electron/server.mjs",
     "bin/node-version.js",
     "LICENSE",
@@ -68,14 +61,9 @@
       "to": "desktop-toolset.json"
     },
     {
-      "from": "build/desktop/shell.json",
-      "to": "desktop-shell.json"
-    },
-    {
       "from": "resources/runtime/win-x64",
       "to": "runtime/win-x64",
       "filter": [
-        "git/**/*",
         "tools/**/*"
       ]
     }

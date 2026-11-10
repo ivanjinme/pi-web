@@ -5,14 +5,14 @@ import { createHash } from "node:crypto";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
-const REQUIRED = ["git/bin/bash.exe", "git/cmd/git.exe", "tools/rg.exe", "tools/fd.exe"];
+const REQUIRED = ["tools/rg.exe", "tools/fd.exe"];
 const RECEIPT = ".desktop-toolset-complete.json";
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 const missing = (error) => error.code === "ENOENT";
 
 function validPath(value) {
-  return typeof value === "string" && /^(git|tools)\//.test(value)
+  return typeof value === "string" && /^tools\//.test(value)
     && value.split("/").every((part) => part && part !== "." && part !== ".."
       && !/[\\<>:"|?*\x00-\x1f\x7f]/.test(part) && !/[. ]$/.test(part)
       && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part));
@@ -88,7 +88,7 @@ export async function createToolsetManifest(sourceRoot) {
       throw new Error(`Not a regular toolset path: ${relative}`);
     }
   }
-  for (const directory of ["git", "tools"]) {
+  for (const directory of ["tools"]) {
     const info = await lstat(path.join(root, directory));
     if (!info.isDirectory() || info.isSymbolicLink()) throw new Error(`Invalid toolset directory: ${directory}`);
     await visit(directory);

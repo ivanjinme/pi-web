@@ -6,7 +6,9 @@
 
 ## 快速开始
 
-要求 Node.js 22.19+。
+要求 Node.js 22.19+。桌面版另需安装 Git for Windows，见
+[docs/desktop-install.md](./docs/desktop-install.md)。桌面更新统一走后台下载安装包、
+明确点击重启的通道，不独立更新业务 ZIP 或 npm；下面 npm 命令用于 Web/CLI 分发。
 
 ```bash
 npx @weclio/pi-web@latest

@@ -1,5 +1,16 @@
 # Desktop update performance: implementation checkpoint
 
+> **Historical record — not the current update design.** The business-ZIP channel,
+> shell-digest release-kind gate, runtime release-index coordinator, trial-health
+> rollback and ≤30-second target below are superseded. Desktop now has one
+> EXE/blockmap update via a signed manifest, with no legacy compatibility index.
+> Git Bash is user-installed; only rg/fd remain
+> bundled/cached, and source-map trimming remains. Successful real Windows VM
+> differential download is still unvalidated; no ≤30-second or health rollback
+> guarantee applies. See `desktop-release.md` for current guidance. Measurements
+> and artifact references below are preserved as history, not evidence that old
+> artifacts were rebuilt, replaced or deleted.
+
 ## Scope and acceptance boundary
 
 Keep Next and the external system Node/npm requirement. Do not migrate to Vite or

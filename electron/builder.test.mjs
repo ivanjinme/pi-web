@@ -30,8 +30,13 @@ test("server dependencies have a dedicated resource mapping, including nested de
   for (const file of files) assert.equal(await readFile(join(destination, file), "utf8"), file);
 });
 
-test("updater main modules and sandbox preload are packaged with optional fixed config", () => {
-  for (const name of ["preload.cjs", "updates.mjs", "update-signature.mjs", "update-install.mjs", "update-gate.mjs", "toolsets.mjs", "application-manifest.mjs", "application-store.mjs", "application-selection.mjs", "application-updates.mjs", "application-runtime.mjs", "update-coordinator.mjs"]) assert.ok(config.files.includes(`electron/${name}`));
+test("installer updater packages only its runtime modules, not obsolete application or build-only modules", () => {
+  assert.deepEqual(config.files, [
+    "electron/main.mjs", "electron/navigation.mjs", "electron/preload.cjs",
+    "electron/updates.mjs", "electron/update-signature.mjs", "electron/update-install.mjs", "electron/update-gate.mjs",
+    "electron/production.mjs", "electron/runtime.mjs", "electron/toolsets.mjs", "electron/server.mjs",
+    "bin/node-version.js", "LICENSE", "!node_modules/**/*",
+  ]);
   assert.deepEqual(config.extraResources.find((entry) => entry.from === "resources"), { from: "resources", to: ".", filter: ["desktop-update.json"] });
 });
 
@@ -56,8 +61,8 @@ test("bootstrap installer ships a generated toolset descriptor separately from t
   assert.deepEqual(config.extraResources.find((entry) => entry.to === "desktop-toolset.json"), { from: "build/desktop/toolset.json", to: "desktop-toolset.json" });
 });
 
-test("bootstrap installer ships a generated shell descriptor so business packages can be matched", () => {
-  assert.deepEqual(config.extraResources.find((entry) => entry.to === "desktop-shell.json"), { from: "build/desktop/shell.json", to: "desktop-shell.json" });
+test("installer has no obsolete shell descriptor or business package resources", () => {
+  assert.deepEqual(config.extraResources.map((entry) => entry.to), [".", "server", "server/node_modules", "desktop-toolset.json", "runtime/win-x64"]);
 });
 
 test("production updater cache matches the installer cache instead of the development fallback", async () => {
@@ -77,7 +82,26 @@ test("the application keeps its server outside asar and includes no system Node 
   assert.ok(config.files.includes("electron/production.mjs"));
   assert.ok(config.files.includes("!node_modules/**/*"));
   assert.ok(config.extraResources.find((entry) => entry.to === "server").filter.includes("desktop-packages.mjs"));
-  assert.deepEqual(config.extraResources.find((entry) => entry.to === "runtime/win-x64").filter, ["git/**/*", "tools/**/*"]);
+  assert.deepEqual(config.extraResources.find((entry) => entry.to === "runtime/win-x64").filter, ["tools/**/*"]);
   assert.equal(config.npmRebuild, false);
   assert.equal(config.nsis.deleteAppDataOnUninstall, false);
+});
+
+test("every relative import of a packaged main-process module is itself packaged", async () => {
+  // asar 只包含 files 里显式列出的文件；漏一个就会在用户机器上变成
+  // ERR_MODULE_NOT_FOUND（本地测试直接读磁盘，永远发现不了）。
+  const packaged = config.files.filter((name) => !name.startsWith("!"));
+  const list = new Set(packaged.map((name) => name.replaceAll("\\", "/")));
+  const modules = packaged.filter((name) => /\.(?:mjs|cjs|js)$/.test(name));
+  assert.ok(modules.length > 10, "expected a substantial packaged module list");
+  for (const name of modules) {
+    const source = await readFile(new URL(`../${name}`, import.meta.url), "utf8");
+    for (const match of source.matchAll(/(?:from|import)\s*\(?\s*["'](\.[^"']+)["']/g)) {
+      const relative = join("electron", match[1]).replaceAll("\\", "/");
+      const resolved = relative.startsWith("electron/../")
+        ? relative.slice("electron/".length)
+        : relative;
+      assert.ok(list.has(resolved), `${name} imports ${match[1]}, which is not in builder.json files`);
+    }
+  }
 });

@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, join } from "node:path";
 import nodeVersion from "../bin/node-version.js";
 import { createRuntimeEnvironment } from "./runtime.mjs";
 import { assertPortAvailable, waitForServer } from "./server.mjs";
@@ -22,9 +22,8 @@ export function resolveSystemNode(env = process.env) {
   return node.executable;
 }
 
-export async function startProductionServer({ resourcesPath, logsPath, url, onUnexpectedExit, signal, toolsetsRoot, toolsetsBase, onToolProgress, serverRoot, readyTimeout }) {
-  if (serverRoot !== undefined && !isAbsolute(serverRoot)) throw new Error("应用程序目录必须是绝对路径。");
-  const root = serverRoot ?? join(resourcesPath, "server");
+export async function startProductionServer({ resourcesPath, logsPath, url, onUnexpectedExit, signal, toolsetsRoot, toolsetsBase, onToolProgress }) {
+  const root = join(resourcesPath, "server");
   if (!existsSync(join(root, ".next", "BUILD_ID"))) throw new Error("安装包缺少 Web 生产构建，请重新安装 Weclio。");
   signal?.throwIfAborted();
   const address = new URL(url);
@@ -32,7 +31,7 @@ export async function startProductionServer({ resourcesPath, logsPath, url, onUn
   // 先检查冲突，避免准备完工具后才发现不能启动；不接管已有服务。
   await assertPortAvailable(port);
   const runtime = toolsetsRoot ?? await resolveDesktopTools({ resourcesPath, storeBase: toolsetsBase, signal, onProgress: onToolProgress });
-  for (const file of ["git/bin/bash.exe", "git/cmd/git.exe", "tools/rg.exe", "tools/fd.exe"]) {
+  for (const file of ["tools/rg.exe", "tools/fd.exe"]) {
     if (!existsSync(join(runtime, file))) throw new Error(`安装包缺少运行工具: ${file}`);
   }  const env = { ...createRuntimeEnvironment(runtime), NODE_ENV: "production", PI_WEB_HOSTNAME: "127.0.0.1" };
   delete env.ELECTRON_RUN_AS_NODE;
@@ -96,18 +95,6 @@ export async function startProductionServer({ resourcesPath, logsPath, url, onUn
       catch (error) { if (error.code !== "ESRCH") console.error(error); }
     }
   };
-  // 快切换必须等自己持有的子进程确认退出，不能只发出 taskkill 就切版本。
-  const stopAndWait = (timeout = 10_000) => new Promise((resolve, reject) => {
-    const exited = () => child.exitCode !== null || child.signalCode !== null;
-    if (exited()) { stop(); resolve(); return; }
-    const cleanup = () => { clearTimeout(timer); child.off("exit", done); child.off("close", done); };
-    const done = () => { cleanup(); resolve(); };
-    const timer = setTimeout(() => { cleanup(); reject(new Error("自有 Web 服务未能按时退出，更新没有继续。")); }, timeout);
-    child.once("exit", done);
-    child.once("close", done);
-    try { stop(); if (exited()) done(); }
-    catch (error) { cleanup(); reject(error); }
-  });
   process.once("exit", stop);
   child.stdout.on("data", (chunk) => {
     record(chunk);
@@ -129,12 +116,11 @@ export async function startProductionServer({ resourcesPath, logsPath, url, onUn
   try {
     await waitForServer(url, {
       signal: controller.signal,
-      timeout: readyTimeout,
       isReady: () => /Ready in/.test(output) && child.exitCode === null && child.signalCode === null,
     });
     if (failure) throw failure;
     ready = true;
-    return { stop, stopAndWait, isRunning: () => !stopping && child.exitCode === null && child.signalCode === null, logFile, updateGate, runtimeRoot: runtime };
+    return { stop, logFile, updateGate };
   } catch (error) {
     stop();
     throw failure ?? new Error(`${error.message}\n服务日志: ${logFile}`);

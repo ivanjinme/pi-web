@@ -8,9 +8,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import nodeVersion from "../bin/node-version.js";
 import { prepareSignedUpdate, readReleaseSigning } from "./update-release.mjs";
 import { createToolsetManifest } from "./toolsets.mjs";
-import { createShellDescriptor } from "./application-release.mjs";
-import { buildReleaseIndex } from "./release-index.mjs";
-import { readShellBaseline, writeShellBaseline } from "./release-baseline.mjs";
 export { validateInstaller } from "./update-release.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -33,7 +30,7 @@ export async function fingerprint(base, paths = inputs) {
 }
 
 export function fingerprintPackaging(base) {
-  return fingerprint(base, ["electron", "resources/desktop-update.json", "resources/runtime/win-x64/git", "resources/runtime/win-x64/tools", "bin/node-version.js"]);
+  return fingerprint(base, ["electron", "resources/desktop-update.json", "resources/runtime/win-x64/tools", "bin/node-version.js"]);
 }
 
 export async function validateVersion(base) {
@@ -107,31 +104,17 @@ async function main() {
   // --quick 可复用服务构建，但工具描述必须绑定本次实际打包的工具。
   if (args.includes("--quick")) {
     await writeFile(join(root, "build/desktop/toolset.json"), JSON.stringify(await createToolsetManifest(join(root, "resources/runtime/win-x64"))) + "\n");
-    // 壳代码或工具变化必须重新生成描述符，否则业务包会错误判定兼容。
-    const toolset = JSON.parse(await readFile(join(root, "build/desktop/toolset.json"), "utf8")).id;
-    await writeFile(join(root, "build/desktop/shell.json"), JSON.stringify(await createShellDescriptor({ root, version, toolset })) + "\n");
   }
   await mkdir(join(root, "build/desktop"), { recursive: true });
-  const generatedFingerprint = await fingerprint(root, ["build/desktop/toolset.json", "build/desktop/shell.json"]);
+  const generatedFingerprint = await fingerprint(root, ["build/desktop/toolset.json"]);
   const output = await mkdtemp(join(root, "build/desktop/release-"));
   try {
     const builder = require.resolve("electron-builder/cli.js");
     const saved = JSON.parse(await readFile(snapshot, "utf8"));
     await run(process.execPath, [builder, "--config", "electron/builder.json", "--win", "--x64", "--publish", "never", "--config.directories.output", output]);
-    if (await fingerprint(root) !== initial || await fingerprintPackaging(root) !== packagingFingerprint || await fingerprint(root, ["build/desktop/toolset.json", "build/desktop/shell.json"]) !== generatedFingerprint || saved.server !== await fingerprint(server, [".next", "node_modules", "package.json", "next.config.js", "desktop-packages.mjs", "public", "LICENSE"])) throw new Error("打包过程中源文件或构建产物变化，请重新执行。");
+    if (await fingerprint(root) !== initial || await fingerprintPackaging(root) !== packagingFingerprint || await fingerprint(root, ["build/desktop/toolset.json"]) !== generatedFingerprint || saved.server !== await fingerprint(server, [".next", "node_modules", "package.json", "next.config.js", "desktop-packages.mjs", "public", "LICENSE"])) throw new Error("打包过程中源文件或构建产物变化，请重新执行。");
     const result = await retainDesktopRelease({ output, dist, version, signing });
-    // 壳命令必须对应一次壳变化；否则应发业务包，不能不知不觉发全量包。
-    const currentShell = JSON.parse(await readFile(join(root, "build/desktop/shell.json"), "utf8"));
-    const baseline = await readShellBaseline({ root });
-    if (baseline && baseline.digest === currentShell.digest && baseline.toolset === currentShell.toolset) {
-      throw new Error("壳内容未变化：请用 npm run release:desktop:app 发布业务包");
-    }
-    const index = buildReleaseIndex({ version, shell: currentShell, installer: { version }, application: null, signing });
-    const indexPath = join(dist, "desktop-release-index.json");
-    await rm(indexPath, { force: true });
-    await writeFile(indexPath, JSON.stringify(index, null, 2) + "\n");
-    await writeShellBaseline({ root, shell: currentShell });
-    console.log(`\n安装包: ${result.installerPath}\n差异文件: ${result.blockmapPath}\n签名清单: ${result.manifestPath}\n发布索引: ${indexPath}\n壳基线: electron/desktop-shell-baseline.json（需提交）\nSHA256: ${result.sha256}\n本命令不会上传。`);
+    console.log(`\n安装包: ${result.installerPath}\n差异文件: ${result.blockmapPath}\n签名清单: ${result.manifestPath}\nSHA256: ${result.sha256}\n本命令不会上传。`);
   } finally {
     await rm(output, { recursive: true, force: true, maxRetries: 3 });
   }

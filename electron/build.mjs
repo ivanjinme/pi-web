@@ -7,7 +7,6 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { copyProductionDependency } from "./package-files.mjs";
 import { createToolsetManifest } from "./toolsets.mjs";
-import { createShellDescriptor } from "./application-release.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const server = join(root, "build", "desktop", "server");
@@ -28,7 +27,7 @@ function run(command, args, cwd) {
 
 try {
   if (process.platform !== "win32" || process.arch !== "x64") throw new Error("桌面构建目前仅支持 Windows x64。");
-  for (const file of ["git/bin/bash.exe", "git/cmd/git.exe", "git/LICENSE.txt", "tools/rg.exe", "tools/fd.exe"]) {
+  for (const file of ["tools/rg.exe", "tools/fd.exe"]) {
     if (!existsSync(join(root, "resources/runtime/win-x64", file))) throw new Error(`请先准备 resources/runtime/win-x64/${file}`);
   }
   // 复用项目 Electron 分发文件；首次缺失时交由 Electron 自身的安装逻辑准备。
@@ -67,10 +66,6 @@ try {
   }
   await rm(join(server, ".next", "cache"), { recursive: true, force: true });
   await writeFile(join(root, "build/desktop/toolset.json"), JSON.stringify(await createToolsetManifest(join(root, "resources/runtime/win-x64"))) + "\n");
-  // 壳描述符绑定壳代码/工具；业务包只能在同一壳下快速切换。
-  const version = JSON.parse(await readFile(join(root, "package.json"), "utf8")).version;
-  const toolset = JSON.parse(await readFile(join(root, "build/desktop/toolset.json"), "utf8")).id;
-  await writeFile(join(root, "build/desktop/shell.json"), JSON.stringify(await createShellDescriptor({ root, version, toolset })) + "\n");
   console.log("[desktop] 生产服务准备完成: build/desktop/server");
 } catch (error) {
   console.error(`[desktop] ${error.message}`);

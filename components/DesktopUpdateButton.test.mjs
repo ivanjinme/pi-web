@@ -21,7 +21,6 @@ function harness(bridge, locale = enLocale) {
   let state = { status: "idle" };
   let effect;
   let updates = 0;
-  const readyRef = { current: false };
   const errors = [];
   const exports = {};
   vm.runInNewContext(compiled, {
@@ -32,7 +31,6 @@ function harness(bridge, locale = enLocale) {
       if (id === "react") return {
         useState: () => [state, (next) => { state = next; updates++; }],
         useEffect: (callback) => { effect = callback; },
-        useRef: () => readyRef,
       };
       if (id === "@/hooks/useI18n") return {
         useI18n: () => ({ locale: locale.id, t: (key, params) => interpolateMessage(locale.messages[key], params) }),
@@ -177,51 +175,31 @@ test("snapshot and restart failures are logged without changing visibility or di
   view.cleanup();
 });
 
-test("mount acknowledges readiness after subscribing and taking a snapshot, once across effect replay", async () => {
+test("effect replay only subscribes and reads a snapshot; there is no business-package health handshake", () => {
   const fixture = bridgeFixture();
-  fixture.bridge.applicationReady = async () => { fixture.calls.push("ready"); };
   const view = harness(fixture.bridge);
-  assert.deepEqual(fixture.calls, ["subscribe", "snapshot", "ready"]);
   view.cleanup();
   const cleanup = view.replayEffect();
-  assert.deepEqual(fixture.calls, ["subscribe", "snapshot", "ready", "subscribe", "snapshot"]);
+  assert.deepEqual(fixture.calls, ["subscribe", "snapshot", "subscribe", "snapshot"]);
   cleanup();
 });
 
-test("readiness failures are logged without hiding update state", async () => {
-  const fixture = bridgeFixture();
-  fixture.bridge.applicationReady = async () => { throw new Error("IPC unavailable"); };
-  const view = harness(fixture.bridge);
-  fixture.emit({ status: "preparing", phase: "verifying" });
-  await settle();
-  assert.equal(view.errors.length, 1);
-  assert.match(renderToStaticMarkup(view.render()), /Verifying update/);
-  view.cleanup();
-});
-
-test("download and preparation progress are localized, noninteractive, and never offer restart", async () => {
+test("installer progress is localized, noninteractive, and never offers restart before completion", async () => {
   for (const locale of [enLocale, zhCNLocale]) {
     const fixture = bridgeFixture();
     const view = harness(fixture.bridge, locale);
-    for (const [status, phase, key] of [
-      ["downloading", "download", "downloading"],
-      ["preparing", undefined, "preparing"],
-      ["preparing", "extracting", "extracting"],
-      ["preparing", "verifying", "verifying"],
-    ]) {
-      for (const [progress, percent] of [[-10, "0%"], [45.6, "46%"], [100, "100%"], [120, "100%"]]) {
-        fixture.emit({ status, phase, progress, kind: "application" });
-        const html = renderToStaticMarkup(view.render());
-        assert.ok(html.includes(locale.messages[`desktopUpdate.${key}`]));
-        assert.ok(html.includes(percent));
-        assert.match(html, /role="status"/);
-        assert.doesNotMatch(html, /<button|Restart to update|重启更新/);
-      }
+    for (const [progress, percent] of [[-10, "0%"], [45.6, "46%"], [100, "100%"], [120, "100%"]]) {
+      fixture.emit({ status: "downloading", progress });
+      const html = renderToStaticMarkup(view.render());
+      assert.ok(html.includes(locale.messages["desktopUpdate.downloading"]));
+      assert.ok(html.includes(percent));
+      assert.match(html, /role="status"/);
+      assert.doesNotMatch(html, /<button|Restart to update|重启更新/);
     }
     for (const progress of [undefined, NaN, Infinity]) {
-      fixture.emit({ status: "preparing", phase: "extracting", progress });
+      fixture.emit({ status: "downloading", progress });
       const html = renderToStaticMarkup(view.render());
-      assert.ok(html.includes(locale.messages["desktopUpdate.extracting"]));
+      assert.ok(html.includes(locale.messages["desktopUpdate.downloading"]));
       assert.doesNotMatch(html, /%|NaN|Infinity|<button/);
     }
     assert.equal(fixture.restartCalls(), 0);
@@ -235,7 +213,7 @@ test("localized error has a separate retry action that checks updates, never res
     let retryCalls = 0;
     fixture.bridge.checkForUpdates = async () => { retryCalls++; };
     const view = harness(fixture.bridge, locale);
-    fixture.emit({ status: "error", kind: "application" });
+    fixture.emit({ status: "error" });
     const error = view.render();
     const [status, retry] = error.props.children;
     assert.equal(status.props.role, "status");

@@ -1,5 +1,15 @@
 # Desktop update: stage 2 implementation
 
+> **Historical implementation/acceptance record.** The dated versions, public
+> release/Latest status and test counts below describe that run, not today's
+> distribution state. Current desktop design retains one signed EXE/blockmap
+> channel, background download, task gate and explicit restart; it has no separate
+> business ZIP/npm updater or health-based rollback. New clients read the signed
+> manifest directly; no legacy compatibility index is generated. See
+> `desktop-release.md` for current guidance. Successful real Windows VM differential
+> transfer remains unvalidated; no ≤30-second guarantee applies. This notice does
+> not replace or delete historical artifacts.
+
 ## Scope
 
 The production installation handoff now uses standard
