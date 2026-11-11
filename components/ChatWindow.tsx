@@ -6,6 +6,7 @@ import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
 import { countToolCallBlocks, getAssistantErrorMessage, getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { MessageView } from "./MessageView";
+import { deriveTurnChanges, type TurnChange } from "@/lib/turn-changes";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
@@ -52,6 +53,8 @@ interface Props {
   onSessionStatsChange?: (stats: SessionStatsInfo | null) => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
   onOpenFile?: (filePath: string) => void;
+  onTurnChangesChange?: (turns: TurnChange[]) => void;
+  onOpenChanges?: (toolCallId: string) => void;
   playDoneSound: () => void;
   unlockAudio: () => void;
 }
@@ -190,7 +193,7 @@ function ProcessDetailsGroup({ durationMs, toolCallCount, children, t }: { durat
   );
 }
 
-export function ChatWindow({ session, newSessionCwd, newTaskDraftId, showProjectPicker, onProjectSelect, onProjectClear, resolveNewSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, onSessionRenamed, onInitialContentReady, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onContextUsageChange, onOpenFile, playDoneSound, unlockAudio }: Props) {
+export function ChatWindow({ session, newSessionCwd, newTaskDraftId, showProjectPicker, onProjectSelect, onProjectClear, resolveNewSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, onSessionRenamed, onInitialContentReady, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onContextUsageChange, onOpenFile, onTurnChangesChange, onOpenChanges, playDoneSound, unlockAudio }: Props) {
   const { t } = useI18n();
   const isMinimapHidden = useIsMobile(400);
   const wrappedOnAgentEnd = useCallback(() => {
@@ -223,6 +226,15 @@ export function ChatWindow({ session, newSessionCwd, newTaskDraftId, showProject
   useEffect(() => {
     if (!loading && session) onInitialContentReady?.(session.id);
   }, [loading, session, onInitialContentReady]);
+
+  const turnChanges = useMemo(() => deriveTurnChanges(messages), [messages]);
+  const changeToolCallIds = useMemo(() => new Set(
+    turnChanges.flatMap((turn) => turn.files.flatMap((file) => file.sections.map((section) => section.toolCallId))),
+  ), [turnChanges]);
+  useEffect(() => {
+    onTurnChangesChange?.(turnChanges);
+  }, [turnChanges, onTurnChangesChange]);
+  useEffect(() => () => { onTurnChangesChange?.([]); }, [onTurnChangesChange]);
 
   const sessionBusy = agentRunning || bashRunning || isCompacting;
   const canCompact = messages.some((message) => message.role === "assistant" && (message as AssistantMessage).stopReason !== "error");
@@ -570,6 +582,8 @@ export function ChatWindow({ session, newSessionCwd, newTaskDraftId, showProject
                     modelNames={modelNames}
                     cwd={messageCwd}
                     onOpenFile={onOpenFile}
+                    onOpenChanges={onOpenChanges}
+                    changeToolCallIds={changeToolCallIds}
                     entryId={entryIds[idx]}
                     onFork={canFork ? handleFork : undefined}
                     forking={canFork && forkingEntryId === entryIds[idx]}

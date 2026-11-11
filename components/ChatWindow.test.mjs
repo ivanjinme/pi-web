@@ -3,6 +3,13 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import ts from "typescript";
 
+test("turn changes feed the workspace without appending summary cards to the timeline", async () => {
+  const source = await readFile(new URL("./ChatWindow.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /TurnChangesChip|pushTurnChanges|changesByGroup|lastGroupByTurn/);
+  assert.match(source, /onTurnChangesChange\?\.\(turnChanges\)/);
+  assert.match(source, /<MessageView[\s\S]*?onOpenChanges=\{onOpenChanges\}[\s\S]*?changeToolCallIds=\{changeToolCallIds\}/);
+});
+
 // 首条消息会改变空态布局；编辑器不能因此卸载，否则异步提交无法恢复输入。
 test("empty and active conversations share one unconditional composer mount", async () => {
   const source = await readFile(new URL("./ChatWindow.tsx", import.meta.url), "utf8");

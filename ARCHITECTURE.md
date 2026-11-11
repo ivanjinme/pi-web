@@ -121,6 +121,18 @@ Browser                Next.js Server              AgentSession (in-process)
 - Compaction stop race: stop may arrive before compaction owns its abort
   controller; retain and reapply the request on `compaction_start`.
 
+## Artifact Workspace
+
+- One flat tab strip hosts Home, Files, individual files and Changes. Tabs are
+  in-memory; project switches reset them, same-project session switches retain files.
+- File tab identity uses `draftPathKey`, matching draft ownership. Mounted file
+  viewers retain mode/editor/scroll state, but only the active visible file watches
+  SSE. Media compare `connected` revisions before reloading after an inactive period.
+- Changes derives successful `edit` patches and `write` content from the selected
+  transcript branch. Writes have no pre-image and never contribute invented line
+  counts. Shell/manual changes and file-level Git Diff are separate concerns.
+- Changes jump requests are one-shot and session-scoped, not persistent view state.
+
 ## Project / Worktree Identity
 
 - Linked worktree **top-level** → main repo `projectRoot`; sessions group under

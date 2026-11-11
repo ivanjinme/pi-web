@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useReducer, useCallback, useRef, useEffect, useLayoutEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionSidebar } from "./SessionSidebar";
@@ -8,8 +8,13 @@ import { ChatWindow } from "./ChatWindow";
 import { FileViewer } from "./FileViewer";
 import { FileDraftStatus } from "./FileDraftStatus";
 import { createFileDraftCoordinator } from "@/hooks/useFileDraft";
+import { draftPathKey } from "@/lib/file-draft";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
-import { TabBar, type Tab } from "./TabBar";
+import { TabBar } from "./TabBar";
+import { ArtifactHome } from "./ArtifactHome";
+import { ArtifactChanges } from "./ArtifactChanges";
+import { artifactTabsReducer, initialArtifactTabs } from "@/lib/artifact-tabs";
+import type { TurnChange } from "@/lib/turn-changes";
 import { SettingsModal } from "./SettingsModal";
 import { CodexUsagePanel } from "./CodexUsagePanel";
 import { DesktopUpdateButton } from "./DesktopUpdateButton";
@@ -20,7 +25,7 @@ import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useAudio } from "@/hooks/useAudio";
 import { copyText } from "@/lib/clipboard";
-import { getFileName, getRelativeFilePath } from "@/lib/file-paths";
+import { getFileName, getRelativeFilePath, normalizeFilePathSlashes } from "@/lib/file-paths";
 import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import { getInitialNavigation } from "@/lib/initial-navigation";
 import { bindWindowControlsOverlay } from "@/lib/window-controls-overlay";
@@ -253,9 +258,14 @@ export function AppShell() {
     return () => ro.disconnect();
   }, [activeTopPanel, isMobile]);
 
-  // Right panel — file tabs only
-  const [fileTabs, setFileTabs] = useState<Tab[]>([]);
-  const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null);
+  const [{ tabs: artifactTabs, activeId: activeArtifactId }, dispatchArtifact] = useReducer(artifactTabsReducer, initialArtifactTabs);
+  const [turnChanges, setTurnChanges] = useState<{ sessionKey: number; turns: TurnChange[] } | null>(null);
+  const handleTurnChangesChange = useCallback((turns: TurnChange[]) => setTurnChanges({ sessionKey, turns }), [sessionKey]);
+  const [changesTarget, setChangesTarget] = useState<{ sessionKey: number; toolCallId: string; requestId: number } | null>(null);
+  const handleChangesTargetHandled = useCallback((requestId: number) => {
+    setChangesTarget((target) => target?.requestId === requestId ? null : target);
+  }, []);
+  const artifactRequestRef = useRef(0);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [rightPanelPreferenceLoaded, setRightPanelPreferenceLoaded] = useState(false);
   const [rightPanelWidth, setRightPanelWidth] = useState(560);
@@ -366,8 +376,7 @@ export function AppShell() {
     setActiveCwd(cwd);
     if (!cwd) {
       activeProjectRootRef.current = null;
-      setFileTabs([]);
-      setActiveFileTabId(null);
+      dispatchArtifact({ type: "reset" });
       return;
     }
     const newProject = projectRoot ?? cwd;
@@ -399,11 +408,8 @@ export function AppShell() {
     setBranchActiveLeafId(null);
     setSystemPrompt(null);
     setActiveTopPanel(null);
-    // File tabs are keyed by absolute path, so tabs opened in the previous
-    // project would otherwise linger after switching to a different project.
-    // Keep the right workspace open: its Explorer now follows the new cwd.
-    setFileTabs([]);
-    setActiveFileTabId(null);
+    // 切换项目清空标签，文件草稿仍由 AppShell 独立持有。
+    dispatchArtifact({ type: "reset" });
     router.replace("/", { scroll: false });
   }, [router, selectedSession]);
 
@@ -411,8 +417,7 @@ export function AppShell() {
     const nextProject = session.projectRoot ?? session.cwd;
     const currentProject = activeProjectRootRef.current;
     if (currentProject && currentProject !== nextProject) {
-      setFileTabs([]);
-      setActiveFileTabId(null);
+      dispatchArtifact({ type: "reset" });
     }
 
     // The sidebar updates its cwd after this click. Make that follow-up update
@@ -538,32 +543,15 @@ export function AppShell() {
     fileName: string,
     options?: { sourceSessionId?: string | null; modeHint?: "diff" },
   ) => {
-    const sourceSessionId = options?.sourceSessionId;
-    const modeHint = options?.modeHint;
-    const tabId = `file:${filePath}`;
-    setFileTabs((prev) => {
-      const existing = prev.find((t) => t.id === tabId);
-      if (!existing) {
-        return [...prev, {
-          id: tabId,
-          label: fileName,
-          filePath,
-          sourceSessionId,
-          initialDisplayMode: modeHint,
-        }];
-      }
-      const sourceUnchanged = !sourceSessionId || existing.sourceSessionId === sourceSessionId;
-      const modeUnchanged = !modeHint || existing.initialDisplayMode === modeHint;
-      if (sourceUnchanged && modeUnchanged) return prev;
-      return prev.map((t) => {
-        if (t.id !== tabId) return t;
-        const next: Tab = { ...t };
-        if (sourceSessionId) next.sourceSessionId = sourceSessionId;
-        if (modeHint) next.initialDisplayMode = modeHint;
-        return next;
-      });
+    const path = normalizeFilePathSlashes(filePath);
+    dispatchArtifact({
+      type: "open",
+      tab: {
+        id: `file:${draftPathKey(path)}`, kind: "file", label: fileName, filePath: path,
+        ...(options?.sourceSessionId ? { sourceSessionId: options.sourceSessionId } : {}),
+        ...(options?.modeHint ? { initialDisplayMode: options.modeHint, diffRequest: ++artifactRequestRef.current } : {}),
+      },
     });
-    setActiveFileTabId(tabId);
     setRightPanelOpen(true);
     // On mobile the file panel is full-screen; close the drawer so it shows.
     if (isMobile) setSidebarOpen(false);
@@ -573,14 +561,18 @@ export function AppShell() {
     handleOpenFile(filePath, getFileName(filePath), { sourceSessionId: selectedSession?.id ?? null });
   }, [handleOpenFile, selectedSession?.id]);
 
-  const handleCloseFileTab = useCallback((tabId: string) => {
-    setFileTabs((prev) => prev.filter((tab) => tab.id !== tabId));
-    setActiveFileTabId((cur) => {
-      if (cur !== tabId) return cur;
-      const remaining = fileTabs.filter((tab) => tab.id !== tabId);
-      return remaining.length > 0 ? remaining[remaining.length - 1].id : null;
-    });
-  }, [fileTabs]);
+  const handleOpenArtifact = useCallback((kind: "home" | "files" | "changes") => {
+    if (kind === "home") dispatchArtifact({ type: "open", tab: { id: "home", kind } });
+    else if (kind === "files") dispatchArtifact({ type: "open", tab: { id: "files", kind } });
+    else dispatchArtifact({ type: "open", tab: { id: "changes", kind } });
+    setRightPanelOpen(true);
+    if (isMobile) setSidebarOpen(false);
+  }, [isMobile]);
+
+  const handleOpenChanges = useCallback((toolCallId: string) => {
+    setChangesTarget({ sessionKey, toolCallId, requestId: ++artifactRequestRef.current });
+    handleOpenArtifact("changes");
+  }, [handleOpenArtifact, sessionKey]);
 
   const handleRightPanelResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -655,8 +647,7 @@ export function AppShell() {
   const handleDraftProjectSelect = useCallback((cwd: string) => {
     const currentProject = activeProjectRootRef.current;
     if (currentProject && currentProject !== cwd) {
-      setFileTabs([]);
-      setActiveFileTabId(null);
+      dispatchArtifact({ type: "reset" });
     }
     activeProjectRootRef.current = cwd;
     setActiveCwd(cwd);
@@ -669,8 +660,7 @@ export function AppShell() {
     activeProjectRootRef.current = null;
     setActiveCwd(null);
     setNewSessionCwd(null);
-    setFileTabs([]);
-    setActiveFileTabId(null);
+    dispatchArtifact({ type: "reset" });
   }, []);
 
   const resolveDefaultWorkspace = useCallback(async (): Promise<string> => {
@@ -742,13 +732,10 @@ export function AppShell() {
     }
   }, [projectTrustBusy, projectTrustCwd]);
 
-  const activeFileTab = fileTabs.find((t) => t.id === activeFileTabId) ?? null;
-  const activeFileBreadcrumb = activeFileTab?.filePath
-    ? [
-        ...(activeCwd ? [getFileName(activeCwd) || activeCwd] : []),
-        ...getRelativeFilePath(activeFileTab.filePath, activeCwd ?? undefined).split(/[\\/]+/).filter(Boolean),
-      ]
-    : [];
+  const activeArtifact = artifactTabs.find((tab) => tab.id === activeArtifactId);
+  const activeFileTab = activeArtifact?.kind === "file" ? activeArtifact : null;
+  const showExplorer = activeArtifact?.kind === "files" || activeArtifact?.kind === "file";
+  const explorerIsCollapsed = activeArtifact?.kind === "file" && rightExplorerCollapsed;
   function openSettings() {
     setUserMenuOpen(false);
     setSettingsContext({
@@ -1414,6 +1401,8 @@ export function AppShell() {
               onContextUsageChange={handleContextUsageChange}
               onInitialContentReady={handleInitialContentReady}
               onOpenFile={handleOpenLinkedFile}
+              onTurnChangesChange={handleTurnChangesChange}
+              onOpenChanges={handleOpenChanges}
               playDoneSound={playDoneSound}
               unlockAudio={unlockAudio}
             />
@@ -1461,9 +1450,10 @@ export function AppShell() {
         </div>
       </div>
 
-      {/* Right workspace: file viewer on the left, Explorer on the right. */}
+      {/* 所有内容共用一层标签；文件预览与草稿不随标签切换卸载。 */}
       <div
         className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}${rightPanelResizing ? " is-resizing" : ""}`}
+        inert={!rightPanelOpen}
         style={{
           display: "flex",
           flexDirection: "column",
@@ -1473,36 +1463,73 @@ export function AppShell() {
       >
         <div className="right-panel-resizer" onPointerDown={handleRightPanelResizeStart} role="separator" aria-orientation="vertical" aria-label="Resize workspace" />
         <div className="right-workspace-titlebar">
-          {fileTabs.length > 0 ? (
-            <TabBar
-              tabs={fileTabs}
-              activeTabId={activeFileTabId ?? ""}
-              onSelectTab={setActiveFileTabId}
-              onCloseTab={handleCloseFileTab}
-            />
-          ) : (
-            <div className="right-empty-file-tab">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6" /></svg>
-              <span>Open file</span>
-            </div>
-          )}
+          <TabBar
+            tabs={artifactTabs}
+            activeTabId={activeArtifactId}
+            onSelectTab={(id) => dispatchArtifact({ type: "select", id })}
+            onCloseTab={(id) => {
+              dispatchArtifact({ type: "close", id });
+              if (id === "changes") setChangesTarget(null);
+            }}
+            onOpenHome={() => handleOpenArtifact("home")}
+          />
         </div>
 
         <div ref={rightWorkspaceRef} className="right-workspace-body">
-          {activeCwd ? (
+          <div className="artifact-content" hidden={activeArtifact?.kind === "files" && !!activeCwd}>
+            {artifactTabs.map((tab) => (
+              <section key={tab.id} className="artifact-panel" role="tabpanel" aria-label={tab.kind === "file" ? tab.label : tab.kind}
+                hidden={tab.id !== activeArtifactId}>
+                {tab.kind === "home" && <ArtifactHome onOpen={handleOpenArtifact} />}
+                {tab.kind === "files" && !activeCwd && (
+                  <div className="right-workspace-empty">{locale === "zh-CN" ? "请选择项目以浏览文件" : "Select a project to browse its files"}</div>
+                )}
+                {tab.kind === "changes" && (
+                  <ArtifactChanges key={sessionKey}
+                    turns={turnChanges?.sessionKey === sessionKey ? turnChanges.turns : []}
+                    target={changesTarget?.sessionKey === sessionKey ? changesTarget : null}
+                    onTargetHandled={handleChangesTargetHandled}
+                    active={rightPanelOpen && tab.id === activeArtifactId} />
+                )}
+                {tab.kind === "file" && (
+                  <>
+                    <nav className="right-file-tabs" aria-label="File location" title={tab.filePath}>
+                      {getRelativeFilePath(tab.filePath, activeCwd ?? undefined).split(/[\\/]+/).filter(Boolean).map((segment, index, segments) => (
+                        <span key={index} className={index === segments.length - 1 ? "is-current" : undefined}>
+                          {index > 0 && <span className="right-file-breadcrumb-separator" aria-hidden="true">›</span>}
+                          <span className="right-file-breadcrumb-segment">{segment}</span>
+                        </span>
+                      ))}
+                    </nav>
+                    <div className="artifact-file-content">
+                      <FileViewer fileDrafts={fileDrafts} filePath={tab.filePath} cwd={activeCwd ?? undefined}
+                        active={rightPanelOpen && tab.id === activeArtifactId}
+                        sourceSessionId={tab.sourceSessionId} gitRefreshKey={explorerRefreshKey}
+                        initialDisplayMode={tab.initialDisplayMode} diffRequest={tab.diffRequest}
+                        onMentionLines={rightPanelOpen && tab.id === activeArtifactId ? handleFileLineMention : undefined}
+                        onOpenFile={(filePath) => handleOpenFile(filePath, getFileName(filePath), { sourceSessionId: tab.sourceSessionId })} />
+                    </div>
+                  </>
+                )}
+              </section>
+            ))}
+          </div>
+          {activeCwd && (
             <>
               <section
+                hidden={!showExplorer}
                 className={`right-explorer-pane${rightExplorerResizing ? " is-resizing" : ""}`}
-                style={{ width: rightExplorerCollapsed ? EXPLORER_COLLAPSED_WIDTH : "var(--saved-explorer-width, 230px)", flex: "0 0 auto" }}
+                style={{ width: activeArtifact?.kind === "files" ? "100%" : explorerIsCollapsed ? EXPLORER_COLLAPSED_WIDTH : "var(--saved-explorer-width, 230px)", flex: "0 0 auto" }}
               >
                 <div className="right-explorer-toolbar">
                   <button
                     type="button"
                     className="right-workspace-icon right-explorer-toggle"
                     onClick={() => setRightExplorerCollapsed((value) => !value)}
-                    title={rightExplorerCollapsed ? "Expand Explorer" : "Collapse Explorer"}
-                    aria-label={rightExplorerCollapsed ? "Expand Explorer" : "Collapse Explorer"}
-                    aria-expanded={!rightExplorerCollapsed}
+                    disabled={activeArtifact?.kind === "files"}
+                    title={explorerIsCollapsed ? "Expand Explorer" : "Collapse Explorer"}
+                    aria-label={explorerIsCollapsed ? "Expand Explorer" : "Collapse Explorer"}
+                    aria-expanded={!explorerIsCollapsed}
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <path d="M7 5h4l2 2h6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-1" />
@@ -1510,7 +1537,7 @@ export function AppShell() {
                     </svg>
                   </button>
                   {rightChangesCount > 0 && (
-                    <button type="button" className={`right-workspace-icon${rightChangesCollapsed ? "" : " is-active"}`} onClick={() => setRightChangesCollapsed((value) => !value)} title={`${rightChangesCount} changed files`} aria-pressed={!rightChangesCollapsed}>
+                    <button type="button" className={`right-workspace-icon${rightChangesCollapsed ? "" : " is-active"}`} onClick={() => setRightChangesCollapsed((value) => !value)} title={`Git: ${rightChangesCount} changed files`} aria-pressed={!rightChangesCollapsed}>
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M3 12h6M15 12h6" /></svg>
                     </button>
                   )}
@@ -1518,7 +1545,7 @@ export function AppShell() {
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m17 8-5-5-5 5M12 3v12" /></svg>
                   </button>
                 </div>
-                <div className="right-explorer-tree" hidden={rightExplorerCollapsed}>
+                <div className="right-explorer-tree" hidden={explorerIsCollapsed}>
                   <FileExplorer
                     ref={rightExplorerRef}
                     cwd={activeCwd}
@@ -1534,44 +1561,12 @@ export function AppShell() {
                 </div>
               </section>
 
-              {!rightExplorerCollapsed && (
+              {showExplorer && activeArtifact?.kind === "file" && !rightExplorerCollapsed && (
                 <div className="right-workspace-resizer" onPointerDown={handleExplorerResizeStart} role="separator" aria-orientation="vertical" aria-label="Resize Explorer" />
               )}
 
-              <section className="right-file-pane">
-                <nav className="right-file-tabs" aria-label="File location" title={activeFileTab?.filePath}>
-                  {activeFileBreadcrumb.map((segment, index) => (
-                    <span key={`${segment}-${index}`} className={index === activeFileBreadcrumb.length - 1 ? "is-current" : undefined}>
-                      {index > 0 && <span className="right-file-breadcrumb-separator" aria-hidden="true">›</span>}
-                      <span className="right-file-breadcrumb-segment">{segment}</span>
-                    </span>
-                  ))}
-                </nav>
-                <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
-                  {activeFileTab?.filePath ? (
-                    <FileViewer
-                      fileDrafts={fileDrafts}
-                      filePath={activeFileTab.filePath}
-                      cwd={activeCwd}
-                      sourceSessionId={activeFileTab.sourceSessionId}
-                      gitRefreshKey={explorerRefreshKey}
-                      initialDisplayMode={activeFileTab.initialDisplayMode}
-                      onMentionLines={rightPanelOpen ? handleFileLineMention : undefined}
-                      onOpenFile={(filePath) => handleOpenFile(filePath, getFileName(filePath), { sourceSessionId: activeFileTab.sourceSessionId })}
-                    />
-                  ) : (
-                    <div className="right-empty-file-view">
-                      <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /><path d="M7 5V3h5l2 2" /></svg>
-                      <strong>Open file</strong>
-                      <span>Select a file from the workspace tree</span>
-                    </div>
-                  )}
-                </div>
-              </section>
             </>
-          ) : rightPanelOpen ? (
-            <div className="right-workspace-empty">Select a project to browse its files</div>
-          ) : null}
+          )}
         </div>
       </div>
     </div>

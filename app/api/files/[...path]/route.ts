@@ -574,8 +574,8 @@ export async function GET(
               // client disconnected
             }
           };
-          // Send initial ping so client knows connection is live
-          send("connected", { filePath });
+          // 重连时提供当前版本，避免未变更的媒体和文档丢失预览状态。
+          send("connected", { filePath, mtime: stat.mtime.toISOString(), size: stat.size });
           try {
             watcher = fs.watch(filePath, () => {
               try {

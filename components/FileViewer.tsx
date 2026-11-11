@@ -32,12 +32,14 @@ import { markdownFallbackReason } from "@/lib/markdown-editing";
 
 interface Props {
   filePath: string;
+  active?: boolean;
   cwd?: string;
   sourceSessionId?: string | null;
   onOpenFile?: (filePath: string) => void;
   onMentionLines?: (relativePath: string, startLine: number, endLine: number) => void;
   gitRefreshKey?: number;
   initialDisplayMode?: DisplayMode;
+  diffRequest?: number;
   fileDrafts: FileDraftCoordinator;
 }
 
@@ -48,7 +50,7 @@ const SOURCE_HIGHLIGHT_MAX_LINES = 1_000;
 const DISPLAY_MODE_LABELS: Record<DisplayMode, string> = {
   source: "Source",
   preview: "Preview",
-  diff: "Diff",
+  diff: "Git Diff",
 };
 
 const FILE_CODE_STYLE: CSSProperties = {
@@ -412,7 +414,13 @@ function DiffView({ patch }: { patch: string }) {
   );
 }
 
-function ImageViewer({ filePath, cwd, sourceSessionId }: Omit<Props, "fileDrafts">) {
+interface MediaRevision {
+  mtime: string;
+  size: number;
+}
+
+function ImageViewer({ filePath, active = true, cwd, sourceSessionId }: Omit<Props, "fileDrafts">) {
+  const hasSubscribedRef = useRef(false);
   const { t } = useI18n();
   const [watching, setWatching] = useState(false);
   const [bust, setBust] = useState(0);
@@ -420,6 +428,7 @@ function ImageViewer({ filePath, cwd, sourceSessionId }: Omit<Props, "fileDrafts
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
+  const revisionRef = useRef<MediaRevision | null>(null);
 
   const ext = getFileName(filePath).toLowerCase().split(".").pop() ?? "";
 
@@ -428,24 +437,35 @@ function ImageViewer({ filePath, cwd, sourceSessionId }: Omit<Props, "fileDrafts
     setSize(null);
     setNaturalSize(null);
     setError(null);
-    setWatching(false);
+    revisionRef.current = null;
+    hasSubscribedRef.current = false;
+  }, [filePath, sourceSessionId]);
 
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
-    }
+  useEffect(() => {
+    setWatching(false);
+    if (!active) return;
 
     const es = new EventSource(getFileApiUrl(filePath, "watch", sourceSessionId));
     esRef.current = es;
 
-    es.addEventListener("connected", () => setWatching(true));
-    es.addEventListener("change", (e) => {
-      try {
-        const d = JSON.parse((e as MessageEvent).data) as { size?: number };
-        if (typeof d.size === "number") setSize(d.size);
-      } catch { /* ignore */ }
+    // A prior subscription may have closed before establishing its revision.
+    const reconnect = hasSubscribedRef.current;
+    hasSubscribedRef.current = true;
+    const updateRevision = (e: Event) => {
+      const revision = JSON.parse((e as MessageEvent).data) as MediaRevision;
+      const previous = revisionRef.current;
+      revisionRef.current = revision;
+      if (previous?.mtime === revision.mtime && previous.size === revision.size) return;
+      setSize(revision.size);
+      if (!previous && !reconnect) return;
+      setError(null);
       setBust((b) => b + 1);
+    };
+    es.addEventListener("connected", (e) => {
+      updateRevision(e);
+      setWatching(true);
     });
+    es.addEventListener("change", updateRevision);
     es.addEventListener("error", () => setWatching(false));
     es.onerror = () => setWatching(false);
 
@@ -453,7 +473,7 @@ function ImageViewer({ filePath, cwd, sourceSessionId }: Omit<Props, "fileDrafts
       es.close();
       esRef.current = null;
     };
-  }, [filePath, sourceSessionId]);
+  }, [active, filePath, sourceSessionId]);
 
   const src = getFileApiUrl(filePath, "read", sourceSessionId, bust ? { v: bust } : undefined);
 
@@ -546,7 +566,8 @@ function formatDuration(seconds: number): string {
   return `${mins}:${String(secs).padStart(2, "0")}`;
 }
 
-function AudioViewer({ filePath, cwd, sourceSessionId }: Omit<Props, "fileDrafts">) {
+function AudioViewer({ filePath, active = true, cwd, sourceSessionId }: Omit<Props, "fileDrafts">) {
+  const hasSubscribedRef = useRef(false);
   const { t } = useI18n();
   const [watching, setWatching] = useState(false);
   const [bust, setBust] = useState(0);
@@ -554,6 +575,7 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Omit<Props, "fileDrafts
   const [duration, setDuration] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
+  const revisionRef = useRef<MediaRevision | null>(null);
 
   const ext = getFileName(filePath).toLowerCase().split(".").pop() ?? "";
 
@@ -562,26 +584,36 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Omit<Props, "fileDrafts
     setSize(null);
     setDuration(null);
     setError(null);
-    setWatching(false);
+    revisionRef.current = null;
+    hasSubscribedRef.current = false;
+  }, [filePath, sourceSessionId]);
 
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
-    }
+  useEffect(() => {
+    setWatching(false);
+    if (!active) return;
 
     const es = new EventSource(getFileApiUrl(filePath, "watch", sourceSessionId));
     esRef.current = es;
 
-    es.addEventListener("connected", () => setWatching(true));
-    es.addEventListener("change", (e) => {
-      try {
-        const d = JSON.parse((e as MessageEvent).data) as { size?: number };
-        if (typeof d.size === "number") setSize(d.size);
-      } catch { /* ignore */ }
+    // A prior subscription may have closed before establishing its revision.
+    const reconnect = hasSubscribedRef.current;
+    hasSubscribedRef.current = true;
+    const updateRevision = (e: Event) => {
+      const revision = JSON.parse((e as MessageEvent).data) as MediaRevision;
+      const previous = revisionRef.current;
+      revisionRef.current = revision;
+      if (previous?.mtime === revision.mtime && previous.size === revision.size) return;
+      setSize(revision.size);
+      if (!previous && !reconnect) return;
       setDuration(null);
       setError(null);
       setBust((b) => b + 1);
+    };
+    es.addEventListener("connected", (e) => {
+      updateRevision(e);
+      setWatching(true);
     });
+    es.addEventListener("change", updateRevision);
     es.addEventListener("error", () => setWatching(false));
     es.onerror = () => setWatching(false);
 
@@ -589,7 +621,7 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Omit<Props, "fileDrafts
       es.close();
       esRef.current = null;
     };
-  }, [filePath, sourceSessionId]);
+  }, [active, filePath, sourceSessionId]);
 
   const src = getFileApiUrl(filePath, "read", sourceSessionId, bust ? { v: bust } : undefined);
 
@@ -663,13 +695,15 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Omit<Props, "fileDrafts
   );
 }
 
-function DocumentViewer({ filePath, cwd, sourceSessionId }: Omit<Props, "fileDrafts">) {
+function DocumentViewer({ filePath, active = true, cwd, sourceSessionId }: Omit<Props, "fileDrafts">) {
+  const hasSubscribedRef = useRef(false);
   const { t } = useI18n();
   const [watching, setWatching] = useState(false);
   const [bust, setBust] = useState(0);
   const [size, setSize] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
+  const revisionRef = useRef<MediaRevision | null>(null);
 
   const ext = getFileExt(filePath);
   const isPdf = ext === "pdf";
@@ -677,48 +711,58 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Omit<Props, "fileDra
     ? getFileApiUrl(filePath, "read", sourceSessionId, bust ? { v: bust } : undefined)
     : getFileApiUrl(filePath, "preview", sourceSessionId, bust ? { v: bust } : undefined);
 
+  const refreshMetadata = useCallback((signal: AbortSignal) => {
+    void fetch(getFileApiUrl(filePath, "meta", sourceSessionId), { signal })
+      .then((r) => r.json())
+      .then((d: { size?: number; error?: string }) => {
+        if (signal.aborted) return;
+        setError(d.error ?? (!isPdf && typeof d.size === "number" && d.size > DOCX_PREVIEW_MAX_BYTES
+          ? "DOCX too large for preview (>10MB)" : null));
+        if (typeof d.size === "number") setSize(d.size);
+      })
+      .catch((e) => { if (!signal.aborted) setError(String(e)); });
+  }, [filePath, isPdf, sourceSessionId]);
+
   useEffect(() => {
     setBust(0);
     setSize(null);
     setError(null);
+    revisionRef.current = null;
+    hasSubscribedRef.current = false;
+    const controller = new AbortController();
+    refreshMetadata(controller.signal);
+    return () => controller.abort();
+  }, [refreshMetadata]);
+
+  useEffect(() => {
     setWatching(false);
-
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
-    }
-
-    fetch(getFileApiUrl(filePath, "meta", sourceSessionId))
-      .then((r) => r.json())
-      .then((d: { size?: number; error?: string }) => {
-        if (d.error) setError(d.error);
-        if (typeof d.size === "number") {
-          setSize(d.size);
-          if (!isPdf && d.size > DOCX_PREVIEW_MAX_BYTES) {
-            setError("DOCX too large for preview (>10MB)");
-          }
-        }
-      })
-      .catch((e) => setError(String(e)));
+    if (!active) return;
 
     const es = new EventSource(getFileApiUrl(filePath, "watch", sourceSessionId));
     esRef.current = es;
 
-    es.addEventListener("connected", () => setWatching(true));
-    es.addEventListener("change", (e) => {
-      try {
-        const d = JSON.parse((e as MessageEvent).data) as { size?: number };
-        if (typeof d.size === "number") {
-          setSize(d.size);
-          if (!isPdf && d.size > DOCX_PREVIEW_MAX_BYTES) {
-            setError("DOCX too large for preview (>10MB)");
-            return;
-          }
-        }
-      } catch { /* ignore */ }
+    // A prior subscription may have closed before establishing its revision.
+    const reconnect = hasSubscribedRef.current;
+    hasSubscribedRef.current = true;
+    const updateRevision = (e: Event) => {
+      const revision = JSON.parse((e as MessageEvent).data) as MediaRevision;
+      const previous = revisionRef.current;
+      revisionRef.current = revision;
+      if (previous?.mtime === revision.mtime && previous.size === revision.size) return;
+      setSize(revision.size);
+      if (!previous && !reconnect) return;
+      if (!isPdf && revision.size > DOCX_PREVIEW_MAX_BYTES) {
+        setError("DOCX too large for preview (>10MB)");
+        return;
+      }
       setError(null);
       setBust((b) => b + 1);
+    };
+    es.addEventListener("connected", (e) => {
+      updateRevision(e);
+      setWatching(true);
     });
+    es.addEventListener("change", updateRevision);
     es.addEventListener("error", () => setWatching(false));
     es.onerror = () => setWatching(false);
 
@@ -726,7 +770,7 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Omit<Props, "fileDra
       es.close();
       esRef.current = null;
     };
-  }, [filePath, isPdf, sourceSessionId]);
+  }, [active, filePath, isPdf, sourceSessionId]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -785,20 +829,20 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Omit<Props, "fileDra
   );
 }
 
-export function FileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionLines, gitRefreshKey, initialDisplayMode, fileDrafts }: Props) {
+export function FileViewer({ filePath, active = true, cwd, sourceSessionId, onOpenFile, onMentionLines, gitRefreshKey, initialDisplayMode, diffRequest, fileDrafts }: Props) {
   if (isImagePath(filePath)) {
-    return <ImageViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
+    return <ImageViewer filePath={filePath} active={active} cwd={cwd} sourceSessionId={sourceSessionId} />;
   }
   if (isAudioPath(filePath)) {
-    return <AudioViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
+    return <AudioViewer filePath={filePath} active={active} cwd={cwd} sourceSessionId={sourceSessionId} />;
   }
   if (isDocumentPreviewPath(filePath)) {
-    return <DocumentViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
+    return <DocumentViewer filePath={filePath} active={active} cwd={cwd} sourceSessionId={sourceSessionId} />;
   }
-  return <TextFileViewer key={filePath} filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} onOpenFile={onOpenFile} onMentionLines={onMentionLines} gitRefreshKey={gitRefreshKey} initialDisplayMode={initialDisplayMode} fileDrafts={fileDrafts} />;
+  return <TextFileViewer key={filePath} filePath={filePath} active={active} cwd={cwd} sourceSessionId={sourceSessionId} onOpenFile={onOpenFile} onMentionLines={onMentionLines} gitRefreshKey={gitRefreshKey} initialDisplayMode={initialDisplayMode} diffRequest={diffRequest} fileDrafts={fileDrafts} />;
 }
 
-function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionLines, gitRefreshKey, initialDisplayMode, fileDrafts }: Props) {
+function TextFileViewer({ filePath, active = true, cwd, sourceSessionId, onOpenFile, onMentionLines, gitRefreshKey, initialDisplayMode, diffRequest, fileDrafts }: Props) {
   const { isDark } = useTheme();
   const { t } = useI18n();
   const draft = useFileDraft(fileDrafts, filePath);
@@ -807,6 +851,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
   const [plainHighlight, setPlainHighlight] = useState(false);
   const contentRequestRef = useRef(0);
   const lastReadTextRef = useRef<string | null>(null);
+  const refreshOnActivateRef = useRef(false);
   const [gitDiff, setGitDiff] = useState<GitFileDiffResponse | null>(null);
   const [gitDiffLoading, setGitDiffLoading] = useState(initialDisplayMode === "diff");
   const [loading, setLoading] = useState(true);
@@ -862,26 +907,42 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
     gitRefreshTimerRef.current = setTimeout(() => void fetchGitDiff(targetPath), 100);
   }, [fetchGitDiff]);
 
-  // Initial load + SSE watch setup
+  const hasGitDiff = gitDiff?.supported === true && typeof gitDiff.patch === "string";
+  const isDeletedDiff = hasGitDiff && gitDiff.status === "deleted";
+
+  // 仅文件或读取上下文变化重置视图；切换标签不影响编辑器和滚动位置。
   useEffect(() => {
     setLoading(true);
     setError(null);
     setGitDiff(null);
     setDisplayMode("source");
     setWrapLines(false);
-    setWatching(false);
     setMarkdownUnsafe(null);
     setSelectedLineRange(null);
+    refreshOnActivateRef.current = false;
 
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
-    }
-
-    fetchContent(filePath).finally(() => setLoading(false));
-
-    // Set up SSE watch
+    let cancelled = false;
     const requests = contentRequestRef;
+    void fetchContent(filePath).finally(() => { if (!cancelled) setLoading(false); });
+    return () => {
+      cancelled = true;
+      ++requests.current;
+    };
+  }, [filePath, fetchContent, cwd]);
+
+  useEffect(() => {
+    setWatching(false);
+    if (!active) {
+      refreshOnActivateRef.current = true;
+      return;
+    }
+    if (refreshOnActivateRef.current) {
+      refreshOnActivateRef.current = false;
+      void fetchContent(filePath);
+      scheduleGitDiff(filePath);
+    }
+    if (isDeletedDiff) return;
+
     const es = new EventSource(getFileApiUrl(filePath, "watch", sourceSessionId));
     esRef.current = es;
 
@@ -903,11 +964,10 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
     };
 
     return () => {
-      ++requests.current;
       es.close();
       esRef.current = null;
     };
-  }, [filePath, fetchContent, scheduleGitDiff, sourceSessionId, fileDrafts]);
+  }, [active, isDeletedDiff, filePath, fetchContent, scheduleGitDiff, sourceSessionId, fileDrafts]);
 
   useEffect(() => {
     scheduleGitDiff(filePath);
@@ -921,19 +981,9 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
     }
   }, [language, initialDisplayMode, cwd, sourceSessionId]);
 
-  const hasGitDiff = gitDiff?.supported === true && typeof gitDiff.patch === "string";
-  const isDeletedDiff = hasGitDiff && gitDiff.status === "deleted";
-
   useEffect(() => {
     if (!hasGitDiff && displayMode === "diff") setDisplayMode("source");
   }, [displayMode, hasGitDiff]);
-
-  useEffect(() => {
-    if (!isDeletedDiff || !esRef.current) return;
-    esRef.current.close();
-    esRef.current = null;
-    setWatching(false);
-  }, [isDeletedDiff]);
 
   // Opened from the Changes list (initialDisplayMode === "diff"): switch to the
   // diff view once the git diff has resolved. We do this after the diff loads
@@ -941,13 +991,13 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
   const autoDiffAppliedRef = useRef(false);
   useEffect(() => {
     autoDiffAppliedRef.current = false;
-  }, [filePath]);
+  }, [filePath, diffRequest]);
   useEffect(() => {
     if (initialDisplayMode === "diff" && hasGitDiff && !autoDiffAppliedRef.current) {
       autoDiffAppliedRef.current = true;
       setDisplayMode("diff");
     }
-  }, [initialDisplayMode, hasGitDiff]);
+  }, [initialDisplayMode, hasGitDiff, diffRequest]);
 
   const content = draft?.text ?? "";
   const fallbackReason = useMemo(() => displayMode === "preview" && language === "markdown"

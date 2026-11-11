@@ -1,1 +1,3 @@
+/* 应用样式入口。 */
 @import "./globals.css";
+@import "../components/artifact-workspace.css";

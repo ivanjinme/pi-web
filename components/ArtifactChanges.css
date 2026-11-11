@@ -1,0 +1,64 @@
+.artifact-changes {
+  --changes-add: #33865b;
+  --changes-del: #bf5353;
+  --changes-shadow: 0 2px 8px rgb(0 0 0 / 5%);
+  --changes-shadow-open: 0 4px 16px rgb(0 0 0 / 8%);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-panel);
+  color: var(--text);
+}
+.dark .artifact-changes { --changes-add: #78bf93; --changes-del: #e78c8c; }
+.artifact-changes-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px 6px; flex: none; }
+.artifact-changes-summary { font-size: 11.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.artifact-changes-stats { font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.artifact-changes-added { color: var(--changes-add); }
+.artifact-changes-removed { color: var(--changes-del); }
+.artifact-changes-scope { display: flex; flex: none; border: 0; background: var(--bg-hover); border-radius: 7px; padding: 2px; margin: 0 0 0 auto; }
+.artifact-changes-scope button { border: 0; background: none; font-family: inherit; font-size: 11px; color: var(--text-muted); padding: 2px 9px; border-radius: 5px; cursor: pointer; white-space: nowrap; transition: background .15s, color .15s; }
+.artifact-changes-scope button[aria-pressed="true"] { background: var(--bg); color: var(--text); box-shadow: 0 1px 3px rgb(0 0 0 / 10%); }
+.artifact-changes button:focus-visible, .artifact-changes summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.artifact-changes-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 10px 12px 24px; }
+.artifact-changes-empty { padding: 40px 20px 16px; text-align: center; color: var(--text-dim); font-size: 12px; }
+.artifact-changes-note { margin: 8px 4px 0; color: var(--text-dim); font-size: 11px; line-height: 1.6; }
+.artifact-changes-turn { margin-bottom: 14px; }
+.artifact-changes-turn[hidden] { display: none; }
+.artifact-changes-turn-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 2px 4px 6px; font-size: 11.5px; font-weight: 600; color: var(--text-muted); }
+.artifact-changes-card { border: 0; border-radius: 10px; background: var(--bg); box-shadow: var(--changes-shadow); margin-bottom: 10px; overflow: hidden; transition: box-shadow .18s; }
+.artifact-changes-card[open] { box-shadow: var(--changes-shadow-open); }
+.artifact-changes-file-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; cursor: pointer; user-select: none; list-style: none; transition: background .12s; }
+.artifact-changes-file-head::-webkit-details-marker { display: none; }
+.artifact-changes-file-head:hover { background: var(--bg-hover); }
+.artifact-changes-file-icon { color: var(--text-dim); flex: none; }
+.artifact-changes-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; color: var(--text); }
+.artifact-changes-chevron { color: var(--text-dim); transition: transform .25s; display: flex; flex: none; font-size: 18px; line-height: 12px; }
+.artifact-changes-card[open] .artifact-changes-chevron { transform: rotate(90deg); }
+.artifact-changes-card-body { overflow-x: auto; }
+.artifact-changes-section + .artifact-changes-section { border-top: 1px dashed var(--border); margin-top: 2px; }
+.artifact-changes-section-label { padding: 4px 10px; color: var(--text-muted); font-size: 10px; line-height: 18px; }
+.artifact-changes-table { font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 20px; min-width: max-content; width: 100%; }
+.artifact-changes-line { display: grid; grid-template-columns: 34px 34px minmax(0, 1fr); }
+.artifact-changes-line > span { padding: 0 6px; white-space: pre; }
+.artifact-changes-gutter { text-align: right; color: var(--text-dim); user-select: none; font-size: 10px; background: color-mix(in srgb, var(--bg-hover) 55%, transparent); }
+.artifact-changes-code { color: var(--text); padding-right: 12px; }
+.artifact-changes-line-added { background: color-mix(in srgb, var(--changes-add) 10%, transparent); }
+.artifact-changes-line-added .artifact-changes-gutter { background: color-mix(in srgb, var(--changes-add) 16%, transparent); color: var(--changes-add); }
+.artifact-changes-line-added .artifact-changes-code::first-letter { color: var(--changes-add); }
+.artifact-changes-line-removed { background: color-mix(in srgb, var(--changes-del) 10%, transparent); }
+.artifact-changes-line-removed .artifact-changes-gutter { background: color-mix(in srgb, var(--changes-del) 16%, transparent); color: var(--changes-del); }
+.artifact-changes-line-removed .artifact-changes-code { color: var(--text-muted); }
+.artifact-changes-line-removed .artifact-changes-code::first-letter { color: var(--changes-del); }
+.artifact-changes-hunk { background: color-mix(in srgb, var(--bg-hover) 70%, transparent); color: var(--text-dim); font-size: 10px; padding: 2px 10px; user-select: none; }
+.artifact-changes-line, .artifact-changes-hunk { animation: artifact-changes-line-in .3s both; animation-delay: calc(min(var(--i, 0), 24) * 14ms); }
+@keyframes artifact-changes-line-in { from { opacity: 0; transform: translateX(5px); } to { opacity: 1; transform: none; } }
+.artifact-changes-more { display: block; width: 100%; border: 0; border-top: 1px dashed var(--border); background: none; font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace; font-size: 10.5px; color: var(--text-dim); padding: 5px; cursor: pointer; }
+.artifact-changes-more:hover { color: var(--text-muted); background: var(--bg-hover); }
+.artifact-changes-flash { animation: artifact-changes-jump-flash 1.15s ease-out; }
+@keyframes artifact-changes-jump-flash { 0%, 40% { box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); } 100% { box-shadow: inset 0 0 0 3px transparent; } }
+@media (prefers-reduced-motion: reduce) {
+  .artifact-changes-line, .artifact-changes-hunk, .artifact-changes-flash { animation: none; }
+  .artifact-changes-card, .artifact-changes-file-head, .artifact-changes-chevron, .artifact-changes-scope button { transition: none; }
+}

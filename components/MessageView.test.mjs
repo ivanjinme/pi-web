@@ -11,9 +11,9 @@ const jiti = createJiti(import.meta.url, {
 const { MessageView } = await jiti.import("./MessageView.tsx");
 const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 
-function renderMessage(message) {
+function renderMessage(message, props = {}) {
   return renderToStaticMarkup(
-    React.createElement(I18nProvider, null, React.createElement(MessageView, { message })),
+    React.createElement(I18nProvider, null, React.createElement(MessageView, { ...props, message })),
   );
 }
 
@@ -57,6 +57,52 @@ for (const blockContent of [false, true]) {
     assert.deepEqual(message, original);
   });
 }
+
+const editMessage = {
+  role: "assistant", model: "test", provider: "test",
+  content: [
+    { type: "toolCall", toolCallId: "edit-1", toolName: "edit", input: { path: "demo.ts", edits: [{ oldText: "old", newText: "new" }] } },
+    { type: "toolCall", toolCallId: "read-1", toolName: "read", input: { path: "demo.ts" } },
+    { type: "text", text: "Finished." },
+  ],
+};
+
+test("only recorded changes add a jump button to the existing tool header", () => {
+  const html = renderMessage(editMessage, {
+    onOpenChanges: () => {}, changeToolCallIds: new Set(["edit-1"]),
+  });
+  assert.equal((html.match(/class="tool-changes-link"/g) ?? []).length, 1);
+  assert.match(html, /aria-label="View in Changes"/);
+  assert.match(html, />edit<\/span>/);
+  assert.match(html, />read<\/span>/);
+  assert.match(html, /Finished\./);
+  let openButtons = 0;
+  for (const [tag] of html.matchAll(/<\/?button\b[^>]*>/g)) {
+    if (tag.startsWith("</")) openButtons--;
+    else {
+      assert.equal(openButtons, 0, "jump button must not be nested inside the expand button");
+      openButtons++;
+    }
+  }
+  assert.equal(openButtons, 0);
+  assert.doesNotMatch(html, /data-turn-changes|files changed|Written content/);
+});
+
+test("unrecorded tools and messages without a jump handler retain their original headers", () => {
+  assert.doesNotMatch(renderMessage(editMessage, {
+    onOpenChanges: () => {}, changeToolCallIds: new Set(),
+  }), /tool-changes-link/);
+  assert.doesNotMatch(renderMessage(editMessage, {
+    changeToolCallIds: new Set(["edit-1"]),
+  }), /tool-changes-link/);
+});
+
+test("memoization updates affected tool links without invalidating unrelated history", () => {
+  const before = { message: editMessage, onOpenChanges: () => {}, changeToolCallIds: new Set() };
+  assert.equal(MessageView.compare(before, { ...before, changeToolCallIds: new Set(["other-call"]) }), true);
+  assert.equal(MessageView.compare(before, { ...before, changeToolCallIds: new Set(["edit-1"]) }), false);
+  assert.equal(MessageView.compare(before, { ...before, onOpenChanges: () => {} }), false);
+});
 
 const largeText = `<strong>${"x".repeat(100_000)}</strong>`;
 

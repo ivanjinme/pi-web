@@ -54,26 +54,27 @@ test("desktop titlebar layout uses overlay geometry while Web retains its origin
   assert.match(styles, /--app-titlebar-button-height: min\(36px, var\(--app-titlebar-height\)\)/);
   assert.equal([...source.matchAll(/height: "var\(--app-titlebar-button-height, 36px\)"/g)].length, 2);
   assert.match(styles, /padding-right: calc\(36px \+ var\(--app-window-controls-inset\)\)/);
-  assert.match(styles, /\.file-tab\)[\s\S]*?-webkit-app-region: no-drag;/);
-  assert.match(tabs, /className="file-tab"/);
-  assert.match(tabs, /height: "var\(--app-titlebar-height, 36px\)"/);
+  assert.match(styles, /\.artifact-tab\)[\s\S]*?-webkit-app-region: no-drag;/);
+  assert.match(tabs, /className=\{`artifact-tab/);
+  const workspaceStyles = await readFile(new URL("./artifact-workspace.css", import.meta.url), "utf8");
+  assert.match(workspaceStyles, /height: var\(--app-titlebar-height, 36px\)/);
 });
 
 test("closing the right panel or collapsing Explorer keeps the file tree mounted", () => {
-  assert.match(source, /\{activeCwd \? \(\s*<>\s*<section/);
+  assert.match(source, /\{activeCwd && \(\s*<>\s*<section\s*hidden=\{!showExplorer\}/);
   assert.doesNotMatch(source, /\{rightPanelOpen && activeCwd \? \(/);
-  assert.match(explorerSource, /<div className="right-explorer-tree" hidden=\{rightExplorerCollapsed\}>/);
+  assert.match(explorerSource, /<div className="right-explorer-tree" hidden=\{explorerIsCollapsed\}>/);
   assert.match(explorerSource, /<FileExplorer[\s\S]*?selectedFilePath=\{activeFileTab\?\.filePath\}[\s\S]*?onChangesCountChange=\{setRightChangesCount\}/);
   assert.doesNotMatch(explorerSource, /\{!rightExplorerCollapsed && \(\s*<div className="right-explorer-tree"/);
 });
 
 test("cross-project navigation clears open file artifacts", () => {
   assert.match(selectSessionSource, /const nextProject = session\.projectRoot \?\? session\.cwd;/);
-  assert.match(selectSessionSource, /if \(currentProject && currentProject !== nextProject\) \{\s*setFileTabs\(\[\]\);\s*setActiveFileTabId\(null\);\s*\}/);
+  assert.match(selectSessionSource, /if \(currentProject && currentProject !== nextProject\) \{\s*dispatchArtifact\(\{ type: "reset" \}\);\s*\}/);
   assert.ok(
-    selectSessionSource.indexOf("setFileTabs([])") < selectSessionSource.indexOf("activeProjectRootRef.current = nextProject"),
+    selectSessionSource.indexOf('dispatchArtifact({ type: "reset" })') < selectSessionSource.indexOf("activeProjectRootRef.current = nextProject"),
   );
 
-  assert.match(selectDraftProjectSource, /if \(currentProject && currentProject !== cwd\) \{\s*setFileTabs\(\[\]\);\s*setActiveFileTabId\(null\);\s*\}/);
-  assert.match(clearDraftProjectSource, /setFileTabs\(\[\]\);\s*setActiveFileTabId\(null\);/);
+  assert.match(selectDraftProjectSource, /if \(currentProject && currentProject !== cwd\) \{\s*dispatchArtifact\(\{ type: "reset" \}\);\s*\}/);
+  assert.match(clearDraftProjectSource, /dispatchArtifact\(\{ type: "reset" \}\);/);
 });

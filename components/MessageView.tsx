@@ -2,6 +2,7 @@
 
 import { memo, useState, useRef, useEffect, useMemo, type ComponentProps } from "react";
 import { MarkdownBody } from "./MarkdownBody";
+import { ArtifactIcon } from "./ArtifactIcon";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 import { compactionSummaryBody } from "@/lib/compaction-summary";
@@ -95,6 +96,8 @@ type EditFromHereHandler = (
 interface Props {
   message: AgentMessage;
   isStreaming?: boolean;
+  onOpenChanges?: (toolCallId: string) => void;
+  changeToolCallIds?: ReadonlySet<string>;
   toolResults?: Map<string, ToolResultMessage>;
   modelNames?: Record<string, string>;
   cwd?: string;
@@ -138,14 +141,14 @@ function haveSameRelevantToolResults(
   return true;
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, entryId, onFork, forking, onEditFromHere, showTimestamp, showActions = true, prevTimestamp, sessionId, runningToolLabel, runningToolCallIds }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onOpenChanges, changeToolCallIds, entryId, onFork, forking, onEditFromHere, showTimestamp, showActions = true, prevTimestamp, sessionId, runningToolLabel, runningToolCallIds }: Props) {
   // 系统提示词和工具配置保留在会话记录中，不显示为聊天气泡。
   if (message.role === "system") return null;
   if (message.role === "user") {
     return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onEditFromHere={onEditFromHere} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} showTimestamp={showTimestamp} showActions={showActions} prevTimestamp={prevTimestamp} sessionId={sessionId} runningToolLabel={runningToolLabel} runningToolCallIds={runningToolCallIds} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenChanges={onOpenChanges} changeToolCallIds={changeToolCallIds} entryId={entryId} onFork={onFork} forking={forking} showTimestamp={showTimestamp} showActions={showActions} prevTimestamp={prevTimestamp} sessionId={sessionId} runningToolLabel={runningToolLabel} runningToolCallIds={runningToolCallIds} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -168,6 +171,10 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.modelNames === next.modelNames
     && prev.cwd === next.cwd
     && prev.onOpenFile === next.onOpenFile
+    && prev.onOpenChanges === next.onOpenChanges
+    && (prev.changeToolCallIds === next.changeToolCallIds || prev.message.role !== "assistant"
+      || prev.message.content.every((block) => block.type !== "toolCall"
+        || prev.changeToolCallIds?.has(block.toolCallId) === next.changeToolCallIds?.has(block.toolCallId)))
     && prev.entryId === next.entryId
     && prev.onFork === next.onFork
     && prev.forking === next.forking
@@ -412,6 +419,8 @@ function AssistantMessageView({
   modelNames,
   cwd,
   onOpenFile,
+  onOpenChanges,
+  changeToolCallIds,
   entryId,
   onFork,
   forking,
@@ -430,6 +439,8 @@ function AssistantMessageView({
   onOpenFile?: (filePath: string) => void;
   entryId?: string;
   onFork?: Props["onFork"];
+  onOpenChanges?: Props["onOpenChanges"];
+  changeToolCallIds?: Props["changeToolCallIds"];
   forking?: boolean;
   showTimestamp?: boolean;
   showActions?: boolean;
@@ -610,7 +621,7 @@ function AssistantMessageView({
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {blockItems.map(({ block, originalIndex }) => (
-          <BlockView key={`${entryId ?? "stream"}-${originalIndex}`} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
+          <BlockView key={`${entryId ?? "stream"}-${originalIndex}`} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} onOpenChanges={onOpenChanges} changeToolCallIds={changeToolCallIds} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
         ))}
         {errorMessage && (
           <div role="alert" style={{
@@ -706,7 +717,7 @@ function AssistantMessageView({
   );
 }
 
-function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCallDurations, cwd, onOpenFile, sessionId, entryId, blockIndex }: { block: AssistantContentBlock; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number>; cwd?: string; onOpenFile?: (filePath: string) => void; sessionId?: string; entryId?: string; blockIndex: number }) {
+function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCallDurations, cwd, onOpenFile, onOpenChanges, changeToolCallIds, sessionId, entryId, blockIndex }: { block: AssistantContentBlock; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number>; cwd?: string; onOpenFile?: (filePath: string) => void; onOpenChanges?: Props["onOpenChanges"]; changeToolCallIds?: Props["changeToolCallIds"]; sessionId?: string; entryId?: string; blockIndex: number }) {
   if (block.type === "text") {
     return <TextBlock block={block as TextContent} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} />;
   }
@@ -717,7 +728,7 @@ function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCal
     const tc = block as ToolCallContent;
     const result = toolResults?.get(tc.toolCallId);
     const duration = toolCallDurations?.get(tc.toolCallId);
-    return <ToolCallBlock block={tc} result={result} duration={duration} />;
+    return <ToolCallBlock block={tc} result={result} duration={duration} onOpenChanges={changeToolCallIds?.has(tc.toolCallId) ? onOpenChanges : undefined} />;
   }
   return null;
 }
@@ -814,7 +825,8 @@ function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
 }
 
 
-function ToolCallBlock({ block, result, duration }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number }) {
+function ToolCallBlock({ block, result, duration, onOpenChanges }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number; onOpenChanges?: Props["onOpenChanges"] }) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const inputStr = JSON.stringify(block.input, null, 2);
   const isEditTool = isEditToolName(block.toolName);
@@ -838,36 +850,44 @@ function ToolCallBlock({ block, result, duration }: { block: ToolCallContent; re
       }}
     >
       {/* ── Tool call header ── */}
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 7,
-          width: "100%",
-          padding: "6px 10px",
-          background: "none",
-          border: "none",
-          color: "var(--text-muted)",
-          cursor: "pointer",
-          fontSize: 12,
-          textAlign: "left",
-          minWidth: 0,
-        }}
-      >
-        <span style={{ color: isError ? "#f87171" : "#16a34a", fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 11, flexShrink: 0 }}>
-          {block.toolName}
-        </span>
-        <span style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
-          {getToolPreview(block)}
-        </span>
-        {duration !== undefined && (
-          <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
+      <div style={{ display: "flex", alignItems: "center" }}>
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 7,
+            width: "100%",
+            padding: "6px 10px",
+            background: "none",
+            border: "none",
+            color: "var(--text-muted)",
+            cursor: "pointer",
+            fontSize: 12,
+            textAlign: "left",
+            minWidth: 0,
+          }}
+        >
+          <span style={{ color: isError ? "#f87171" : "#16a34a", fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 11, flexShrink: 0 }}>
+            {block.toolName}
+          </span>
+          <span style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
+            {getToolPreview(block)}
+          </span>
+          {duration !== undefined && (
+            <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
+          )}
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--text-dim)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
+            <polyline points="2 3.5 5 6.5 8 3.5" />
+          </svg>
+        </button>
+        {onOpenChanges && (
+          <button type="button" className="tool-changes-link" onClick={() => onOpenChanges(block.toolCallId)}
+            title={t("chat.viewChanges")} aria-label={t("chat.viewChanges")}>
+            <ArtifactIcon kind="changes" size={14} />
+          </button>
         )}
-        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--text-dim)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
-          <polyline points="2 3.5 5 6.5 8 3.5" />
-        </svg>
-      </button>
+      </div>
 
       {/* ── Expanded: input args ── */}
       {expanded && !isEditTool && (

@@ -1,116 +1,66 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, type KeyboardEvent } from "react";
+import type { ArtifactTab } from "@/lib/artifact-tabs";
 import { getFileIcon } from "./FileIcons";
+import { ArtifactIcon } from "./ArtifactIcon";
 import { useI18n } from "@/hooks/useI18n";
 
-export interface Tab {
-  id: string;
-  label: string;
-  filePath: string;
-  sourceSessionId?: string | null;
-  initialDisplayMode?: "source" | "preview" | "diff";
-}
-
 interface Props {
-  tabs: Tab[];
+  tabs: ArtifactTab[];
   activeTabId: string;
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
+  onOpenHome: () => void;
 }
 
-export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
-  const { t } = useI18n();
-  const [hoveredClose, setHoveredClose] = useState<string | null>(null);
+export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onOpenHome }: Props) {
+  const { locale, t } = useI18n();
+  const listRef = useRef<HTMLDivElement>(null);
+  const homeLabel = locale === "zh-CN" ? "首页" : "Home";
+
+  function navigate(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    let next: number;
+    switch (event.key) {
+      case "ArrowLeft": next = (index - 1 + tabs.length) % tabs.length; break;
+      case "ArrowRight": next = (index + 1) % tabs.length; break;
+      case "Home": next = 0; break;
+      case "End": next = tabs.length - 1; break;
+      default: return;
+    }
+    event.preventDefault();
+    onSelectTab(tabs[next].id);
+    listRef.current?.querySelectorAll<HTMLButtonElement>("[role='tab']")[next]?.focus();
+  }
 
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "flex-end",
-        background: "var(--bg-panel)",
-        overflowX: "auto",
-        flexShrink: 0,
-        height: "var(--app-titlebar-height, 36px)",
-      }}
-    >
-      {tabs.map((tab) => {
-        const isActive = tab.id === activeTabId;
-        return (
-          <div
-            key={tab.id}
-            className="file-tab"
-            onClick={() => onSelectTab(tab.id)}
-            onMouseDown={(e) => {
-              if (e.button === 1) e.preventDefault();
-            }}
-            onAuxClick={(e) => {
-              if (e.button !== 1) return;
-              e.preventDefault();
-              e.stopPropagation();
-              onCloseTab(tab.id);
-            }}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              height: "var(--app-titlebar-height, 36px)",
-              paddingLeft: 12,
-              paddingRight: 6,
-              borderRight: "1px solid var(--border)",
-              background: isActive ? "var(--bg)" : "var(--bg-panel)",
-              cursor: "pointer",
-              fontSize: 12,
-              color: isActive ? "var(--text)" : "var(--text-muted)",
-              whiteSpace: "nowrap",
-              maxWidth: 180,
-              minWidth: 80,
-              flexShrink: 0,
-              userSelect: "none",
-              transition: "background 0.1s, color 0.1s",
-            }}
-          >
-            <span style={{ flexShrink: 0, opacity: isActive ? 1 : 0.7, display: "flex", alignItems: "center" }}>
-              {getFileIcon(tab.label, 13)}
-            </span>
-            <span
-              style={{
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                flex: 1,
-                fontWeight: isActive ? 500 : 400,
-              }}
-              title={tab.filePath}
-            >
-              {tab.label}
-            </span>
-            <button
-              onClick={(e) => { e.stopPropagation(); onCloseTab(tab.id); }}
-              onMouseEnter={() => setHoveredClose(tab.id)}
-              onMouseLeave={() => setHoveredClose(null)}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: 24, height: 24,
-                background: hoveredClose === tab.id ? "var(--bg-hover)" : "transparent",
-                border: "none",
-                borderRadius: 4,
-                color: hoveredClose === tab.id ? "var(--text)" : "var(--text-dim)",
-                cursor: "pointer",
-                padding: 0,
-                flexShrink: 0,
-                transition: "background 0.1s, color 0.1s",
-              }}
-               title={t("i18n.close")}
-               aria-label={`${t("i18n.close")} ${tab.label}`}
-            >
-              <svg width="11" height="11" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-                <line x1="2" y1="2" x2="8" y2="8" />
-                <line x1="8" y1="2" x2="2" y2="8" />
-              </svg>
-            </button>
-          </div>
-        );
-      })}
+    <div className="artifact-tabbar">
+      <div className="artifact-tablist" role="tablist" aria-label={locale === "zh-CN" ? "工作区" : "Workspace"} ref={listRef}>
+        {tabs.map((tab, index) => {
+          const active = tab.id === activeTabId;
+          const label = tab.kind === "file" ? tab.label : tab.kind === "home" ? homeLabel : tab.kind === "files" ? "Files" : "Changes";
+          return (
+            <div className={`artifact-tab${active ? " is-active" : ""}`} key={tab.id}
+              onMouseDown={(event) => { if (event.button === 1) event.preventDefault(); }}
+              onAuxClick={(event) => {
+                if (event.button === 1) { event.preventDefault(); onCloseTab(tab.id); }
+              }}>
+              <button type="button" role="tab" aria-selected={active} tabIndex={active ? 0 : -1}
+                className="artifact-tab-select" title={tab.kind === "file" ? tab.filePath : label}
+                onClick={() => onSelectTab(tab.id)} onKeyDown={(event) => navigate(event, index)}>
+                {tab.kind === "file" ? getFileIcon(tab.label, 13) : <ArtifactIcon kind={tab.kind} size={14} />}
+                <span>{label}</span>
+              </button>
+              <button type="button" className="artifact-tab-close" onClick={() => onCloseTab(tab.id)} aria-label={`${t("i18n.close")} ${label}`}>
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="m2 2 6 6m0-6L2 8" /></svg>
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <button type="button" className="right-workspace-icon artifact-add-tab" onClick={onOpenHome} title={homeLabel} aria-label={homeLabel}>
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg>
+      </button>
     </div>
   );
 }
