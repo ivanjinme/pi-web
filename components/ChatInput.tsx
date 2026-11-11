@@ -420,8 +420,24 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
   useEffect(() => {
     if (!autoFocus) return;
-    const frame = requestAnimationFrame(focusComposer);
-    return () => cancelAnimationFrame(frame);
+    let frame = 0;
+    const content = document.getElementById("startup-content");
+    // 开屏期间 inert 会拒绝聚焦，等散场解除后再执行一次。
+    const observer = new MutationObserver(() => {
+      if (!content?.inert) {
+        observer.disconnect();
+        frame = requestAnimationFrame(focusComposer);
+      }
+    });
+    if (content?.inert) {
+      observer.observe(content, { attributes: true, attributeFilter: ["inert"] });
+    } else {
+      frame = requestAnimationFrame(focusComposer);
+    }
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
   }, [autoFocus, focusComposer]);
 
   useEffect(() => {

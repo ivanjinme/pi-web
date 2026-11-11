@@ -24,6 +24,7 @@ import { getFileName, getRelativeFilePath } from "@/lib/file-paths";
 import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import { getInitialNavigation } from "@/lib/initial-navigation";
 import { bindWindowControlsOverlay } from "@/lib/window-controls-overlay";
+import { dismissStartupSplash } from "@/lib/dismiss-startup-splash";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ProjectTrustStatus } from "@/lib/api-types";
 import type { ChatInputHandle } from "./ChatInput";
@@ -319,6 +320,10 @@ export function AppShell() {
   }, [rightPanelOpen, rightPanelPreferenceLoaded]);
   // True once the initial ?session= URL param has been resolved (or confirmed absent)
   const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !initialSessionId);
+  const [initialSidebarLoaded, setInitialSidebarLoaded] = useState(false);
+  const [readySessionId, setReadySessionId] = useState<string | null>(null);
+  const handleInitialSidebarLoaded = useCallback(() => setInitialSidebarLoaded(true), []);
+  const handleInitialContentReady = useCallback((id: string) => setReadySessionId(id), []);
   // Suppresses sessionKey bump in handleCwdChange during the initial URL restore
   const suppressCwdBumpRef = useRef(false);
 
@@ -683,6 +688,14 @@ export function AppShell() {
   const projectTrustCwd = selectedSession?.cwd ?? effectiveNewSessionCwd;
   // While restoring initial session from URL, don't show the placeholder
   const showPlaceholder = initialSessionRestored && !showChat;
+  const startupReady = initialSidebarLoaded
+    && initialCwdStatus !== "validating"
+    && initialSessionRestored
+    && (!selectedSession || readySessionId === selectedSession.id);
+
+  useEffect(() => {
+    if (startupReady) return dismissStartupSplash();
+  }, [startupReady]);
 
   useEffect(() => {
     setProjectTrust(null);
@@ -767,6 +780,7 @@ export function AppShell() {
         initialSessionId={initialSessionId}
         skipInitialProjectSelection={initialNavigation.requestedCwd !== null}
         onInitialRestoreDone={handleInitialRestoreDone}
+        onInitialLoadDone={handleInitialSidebarLoaded}
         refreshKey={refreshKey}
         onSessionDeleted={handleSessionDeleted}
         selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
@@ -1398,6 +1412,7 @@ export function AppShell() {
               onSystemPromptChange={handleSystemPromptChange}
               onSessionStatsChange={handleSessionStatsChange}
               onContextUsageChange={handleContextUsageChange}
+              onInitialContentReady={handleInitialContentReady}
               onOpenFile={handleOpenLinkedFile}
               playDoneSound={playDoneSound}
               unlockAudio={unlockAudio}

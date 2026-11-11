@@ -44,6 +44,7 @@ interface Props {
   onSessionCreated?: (session: SessionInfo) => void;
   onSessionForked?: (newSessionId: string) => void;
   onSessionRenamed?: (name: string) => void;
+  onInitialContentReady?: (sessionId: string) => void;
   modelsRefreshKey?: number;
   chatInputRef?: React.RefObject<ChatInputHandle | null>;
   onBranchDataChange?: (tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => void;
@@ -189,7 +190,7 @@ function ProcessDetailsGroup({ durationMs, toolCallCount, children, t }: { durat
   );
 }
 
-export function ChatWindow({ session, newSessionCwd, newTaskDraftId, showProjectPicker, onProjectSelect, onProjectClear, resolveNewSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, onSessionRenamed, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onContextUsageChange, onOpenFile, playDoneSound, unlockAudio }: Props) {
+export function ChatWindow({ session, newSessionCwd, newTaskDraftId, showProjectPicker, onProjectSelect, onProjectClear, resolveNewSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, onSessionRenamed, onInitialContentReady, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onContextUsageChange, onOpenFile, playDoneSound, unlockAudio }: Props) {
   const { t } = useI18n();
   const isMinimapHidden = useIsMobile(400);
   const wrappedOnAgentEnd = useCallback(() => {
@@ -218,6 +219,11 @@ export function ChatWindow({ session, newSessionCwd, newTaskDraftId, showProject
     session, newSessionCwd, onAgentEnd: wrappedOnAgentEnd, onSessionCreated, onSessionForked, onSessionRenamed,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, resolveNewSessionCwd,
   });
+  // loading 结束包含成功和失败；错误界面也必须能结束开屏。
+  useEffect(() => {
+    if (!loading && session) onInitialContentReady?.(session.id);
+  }, [loading, session, onInitialContentReady]);
+
   const sessionBusy = agentRunning || bashRunning || isCompacting;
   const canCompact = messages.some((message) => message.role === "assistant" && (message as AssistantMessage).stopReason !== "error");
   const runningToolLabel = agentPhase?.kind === "running_tools" ? phaseLabel(agentPhase, t) : undefined;

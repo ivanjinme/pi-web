@@ -8,6 +8,7 @@ import { SERVER_URL, isAppUrl, isExternalUrl, isPermissionAllowed, restoreDeskto
 import { startProductionServer } from "./production.mjs";
 import { assertPortAvailable } from "./server.mjs";
 import { resolveDesktopTools } from "./toolsets.mjs";
+import { desktopStartupPage } from "../lib/startup-splash.mjs";
 
 app.setName("Weclio");
 
@@ -192,7 +193,7 @@ if (holdsSingleInstance) app.whenReady().then(async () => {
   const window = createMainWindow();
   if (app.isPackaged) {
     // 先显示可关闭的启动页；异步初始化不能让慢磁盘上的首次启动看起来毫无响应。
-    const html = '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Weclio</title><style>body{margin:0;background:#f8f7ff;color:#1d1e21;font:16px system-ui;display:grid;place-content:center;min-height:100vh}h1{font-size:24px;font-weight:500}p{color:#625e70}</style><main role="status"><h1>正在启动 Weclio</h1><p>首次打开需要准备内置扩展与技能，请稍候。</p></main></html>';
+    const html = desktopStartupPage();
     await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
     let lastToolProgress = 0;
     const toolsetsBase = process.env.LOCALAPPDATA;
