@@ -123,15 +123,12 @@ Browser                Next.js Server              AgentSession (in-process)
 
 ## Artifact Workspace
 
-- One flat tab strip hosts Home, Files, individual files and Changes. Tabs are
-  in-memory; project switches reset them, same-project session switches retain files.
-- File tab identity uses `draftPathKey`, matching draft ownership. Mounted file
-  viewers retain mode/editor/scroll state, but only the active visible file watches
-  SSE. Media compare `connected` revisions before reloading after an inactive period.
-- Changes derives successful `edit` patches and `write` content from the selected
-  transcript branch. Writes have no pre-image and never contribute invented line
-  counts. Shell/manual changes and file-level Git Diff are separate concerns.
-- Changes jump requests are one-shot and session-scoped, not persistent view state.
+- Changes reflects successful `edit` and `write` records in the selected transcript
+  branch, not Git or shell/manual changes. Writes lack a pre-image and cannot
+  provide accurate added/removed line counts.
+- File tabs share the draft's normalized path identity. Retained viewers preserve
+  state, but inactive viewers must not consume file-watch SSE connections; resuming
+  them must reconcile missed changes without resetting unchanged content.
 
 ## Project / Worktree Identity
 
