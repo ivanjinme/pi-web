@@ -13,6 +13,7 @@ import {
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import { getProjectTrustStatus } from "@/lib/project-trust";
+import { getExtensionPackageName } from "@/lib/extension-package-name";
 import type {
   PluginDiagnostic,
   PluginPackageInfo,
@@ -180,7 +181,9 @@ function collectResource(
         : "theme";
   resources.push({
     kind: resourceKind,
-    name: getResourceName(resource.path, resourceKind),
+    name: (resourceKind === "extension"
+      ? getExtensionPackageName(resource.path, resource.metadata.packageRoot)
+      : undefined) ?? getResourceName(resource.path, resourceKind),
     path: resource.path,
     relativePath: getRelativePath(resource),
   });
