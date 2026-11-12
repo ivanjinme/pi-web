@@ -48,6 +48,9 @@ next-env.d.ts
 # playwright cli debug artifacts
 .playwright-cli/
 
+# 本机 Pi 调试配置（保留共享 skills/prompts 的跟踪）
+/.pi/settings.json
+
 # pi project-local npm dependencies and temporary files
 /.pi/npm/
 /.pi/tmp/
