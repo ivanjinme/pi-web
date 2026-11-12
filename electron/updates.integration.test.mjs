@@ -129,10 +129,11 @@ async function fixture(t, { version = "0.2.0", hash = sha512, size = bytes.lengt
     });
     const states = [];
     const errors = [];
+    const progress = [];
     const downloaded = [];
     updater.on("update-downloaded", (event) => downloaded.push(event.downloadedFile));
-    const service = createUpdateService({ updater, token, abort, installEnabled, publish: (state) => states.push(state), log: (...args) => errors.push(args.join(" ")) });
-    const value = { service, updater, token, abort, states, errors, downloaded };
+    const service = createUpdateService({ updater, token, abort, installEnabled, publish: (state) => states.push(state), log: (...args) => errors.push(args.join(" ")), logProgress: (...args) => progress.push(args.join(" ")) });
+    const value = { service, updater, token, abort, states, errors, progress, downloaded };
     sessions.push(value);
     return value;
   }
@@ -167,6 +168,7 @@ test("real NSIS pipeline downloads signed fixture bytes, without installing", { 
   try {
     await assertDownloaded(s);
     assert.equal(f.exeRequests(), 1);
+    assert.ok(s.progress.some((line) => line.includes('"differential download fallback"') && line.includes('"status":404')));
     await s.service.check();
     assert.equal(f.exeRequests(), 1, "downloaded service must not download again");
   } finally { s.service.stop(); }
@@ -179,6 +181,9 @@ test("real NSIS differential pipeline downloads only two separate ranges and reu
   await mkdir(helper.cacheDir, { recursive: true });
   await writeFile(join(helper.cacheDir, CURRENT_APP_INSTALLER_FILE_NAME), f.oldBytes);
   await assertDownloaded(s);
+  assert.ok(s.progress.some((line) => line.includes('"differential download started"')));
+  assert.ok(s.progress.some((line) => line.includes('"differential download completed"')));
+  assert.ok(!s.progress.some((line) => line.includes('"differential download fallback"')));
   assert.deepEqual(f.artifactRequests, [{ range: "bytes=8-15" }, { range: "bytes=24-31" }]);
   assert.ok(f.requests.includes("/Weclio-0.1.10-test.exe.blockmap"));
   assert.ok(f.requests.includes("/Weclio-0.2.0-test.exe.blockmap"));

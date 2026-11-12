@@ -144,7 +144,8 @@ test("cache cleanup failures are logged without hiding the verification error or
   await assert.rejects(h.service.verifyForInstall(), /changed after downloading/);
   assert.equal(h.service.getState().status, "idle");
   assert.equal(h.service.canInstall(), false);
-  assert.ok(h.logs.some((args) => args.includes("Cache cleanup failed")));
+  assert.ok(h.logs.some((args) => JSON.parse(args[1]).kind === "cache cleanup failure"));
+  assert.doesNotMatch(JSON.stringify(h.logs), /Cache cleanup failed/);
   assert.throws(() => h.service.quitAndInstall(), /not verified/);
   assertNoHandoff(h);
 });
@@ -165,7 +166,8 @@ test("downloaded plaintext with a mismatched manifest size never becomes install
   await h.service.check();
   assert.deepEqual(h.service.getState(), { status: "idle" });
   assert.equal(h.service.canInstall(), false);
-  assert.ok(h.logs.some((args) => args.includes("Downloaded update size mismatch")));
+  assert.ok(h.logs.some((args) => JSON.parse(args[1]).kind === "size mismatch"));
+  assert.doesNotMatch(JSON.stringify(h.logs), /Downloaded update size mismatch/);
   await assert.rejects(h.service.verifyForInstall(), /download-only/);
   assert.throws(() => h.service.quitAndInstall(), /not verified/);
   assertNoHandoff(h);
@@ -180,7 +182,8 @@ test("onInstallError subscribes to the fake updater and unsubscribe removes only
   const first = new Error("Fake updater install failure");
   h.updater.emit("error", first);
   assert.deepEqual(received, [first]);
-  assert.ok(h.logs.some((args) => args.includes(first.message)));
+  assert.ok(h.logs.some((args) => { const diagnostic = JSON.parse(args[1]); return diagnostic.name === "Error" && diagnostic.kind === "other"; }));
+  assert.doesNotMatch(JSON.stringify(h.logs), /Fake updater install failure/);
   unsubscribe();
   assert.equal(h.updater.listenerCount("error"), originalListeners);
   h.updater.emit("error", new Error("After unsubscribe"));

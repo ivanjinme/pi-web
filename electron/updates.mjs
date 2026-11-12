@@ -7,6 +7,32 @@ import { updateKey, updateUrl, verifyManifest } from "./update-signature.mjs";
 
 export const UPDATE_CHANNELS = Object.freeze({ get: "desktop-update:get", state: "desktop-update:state", restart: "desktop-update:restart", check: "desktop-update:check" });
 const PERIOD = 4 * 60 * 60 * 1000;
+const NETWORK_CODES = new Set(["UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "UND_ERR_SOCKET", "ECONNRESET", "ECONNREFUSED", "EAI_AGAIN", "ENOTFOUND", "ETIMEDOUT", "ENETUNREACH", "EHOSTUNREACH", "EPIPE"]);
+
+const CHROMIUM_CODES = new Set(["ERR_NAME_NOT_RESOLVED", "ERR_CONNECTION_TIMED_OUT", "ERR_TIMED_OUT", "ERR_CONNECTION_RESET", "ERR_CONNECTION_CLOSED", "ERR_CONNECTION_REFUSED", "ERR_INTERNET_DISCONNECTED", "ERR_NETWORK_CHANGED", "ERR_ADDRESS_UNREACHABLE"]);
+
+function errorDetails(error) {
+  const message = typeof error?.message === "string" ? error.message.slice(0, 8192) : "";
+  const safeMessage = message.replace(/https?:\/\/[^\s"']+/gi, "[url]");
+  const securityPattern = /signature|checksum|sha\d*|hash|integrity|unsafe|certificate|cert_|ssl/i;
+  const security = error?.name === "AbortError" || /ABORT/i.test(String(error?.code ?? "")) || securityPattern.test(safeMessage) || securityPattern.test(String(error?.code ?? "")) || securityPattern.test(String(error?.cause?.code ?? "")) || securityPattern.test(String(error?.cause?.message ?? "").replace(/https?:\/\/[^\s"']+/gi, "[url]"));
+  const chromium = /^net::(ERR_[A-Z_]+)$/.exec(safeMessage)?.[1];
+  const http = /^Manifest HTTP (\d{3})$/.exec(safeMessage)?.[1] ?? /^Cannot download "\[url\]", status (\d{3})(?::|$)/.exec(safeMessage)?.[1];
+  const status = Number(error?.statusCode ?? http);
+  const transient = !security && (error?.name === "TimeoutError" || safeMessage === "Request timed out" || NETWORK_CODES.has(error?.code) || (error?.name === "TypeError" && NETWORK_CODES.has(error?.cause?.code)) || CHROMIUM_CODES.has(chromium) || status === 429 || (status >= 500 && status <= 599));
+  const safeCode = (value) => typeof value === "string" && /^(?:UND_ERR_[A-Z_]+|E[A-Z_]+|ERR_[A-Z_]+|HTTP_ERROR_\d{3})$/.test(value) && value.length <= 64 ? value : undefined;
+  const address = error?.cause?.address ?? error?.address;
+  return {
+    transient,
+    diagnostic: {
+      name: ["Error", "TypeError", "SyntaxError", "TimeoutError", "AbortError", "HttpError"].includes(error?.name) ? error.name : "Error",
+      code: safeCode(error?.code), causeCode: safeCode(error?.cause?.code), chromiumCode: CHROMIUM_CODES.has(chromium) ? chromium : undefined,
+      status: Number.isInteger(status) && status >= 100 && status <= 599 ? status : undefined,
+      address: typeof address === "string" && address.length <= 253 && /^(?:[a-z0-9-]+\.)*[a-z0-9-]+$/i.test(address) ? address : undefined,
+      kind: /checksum mismatch/i.test(safeMessage) ? "checksum mismatch" : /signature/i.test(safeMessage) ? "signature error" : /size mismatch/i.test(safeMessage) ? "size mismatch" : error?.name === "SyntaxError" ? "malformed JSON" : safeMessage === "Manifest too large" ? "manifest too large" : ["Invalid stable update manifest", "Invalid EXE metadata", "Invalid base64", "Invalid base64 length"].includes(safeMessage) ? "invalid update metadata" : safeMessage === "No verified update downloaded" ? "missing downloaded files" : security ? "security-or-abort" : transient ? "transient" : "other",
+    },
+  };
+}
 
 export async function loadUpdateConfig({ packaged, resourcesPath, env = process.env }) {
   const path = packaged ? join(resourcesPath, "desktop-update.json") : env.WECLIO_UPDATE_CONFIG;
@@ -68,21 +94,64 @@ export function makeDownloadOnlyUpdater(NsisUpdater, updaterCacheDirName) {
   return makeManagedUpdater(NsisUpdater, false, updaterCacheDirName);
 }
 
-export function createUpdateService({ updater, token, abort = new AbortController(), publish = () => {}, log = console.error, setTimer = setInterval, clearTimer = clearInterval, statFile = stat, installEnabled = false }) {
+export function createUpdateService({ updater, token, abort = new AbortController(), publish = () => {}, log = console.error, logProgress = log, setTimer = setInterval, clearTimer = clearInterval, setRetryTimer = setTimeout, clearRetryTimer = clearTimeout, statFile = stat, installEnabled = false }) {
   let state = { status: "idle" };
   let timer;
+  let retryTimer;
+  let retryAttempt = 0;
+  let started = false;
   let stopped = false;
   let busy = false;
   let downloadedUpdate;
   let verifiedForInstall = false;
   const change = (next) => { if (!stopped) { state = next; publish({ ...state }); } };
+  let differentialStarted = false;
+  let differentialFallback = false;
+  // 上游日志可能包含完整下载地址；只输出固定分类，不转发原文。
+  const upstreamLog = (message) => {
+    if (typeof message !== "string") return;
+    if (message.startsWith("Differential download: ")) {
+      differentialStarted = true;
+      logProgress("[desktop-update]", JSON.stringify({ kind: "differential download started" }));
+    } else if (message.startsWith("Cannot download differentially, fallback to full download:")) {
+      differentialFallback = true;
+      const safeMessage = message.slice(0, 8192).replace(/https?:\/\/[^\s"']+/gi, "[url]");
+      const statuses = [...safeMessage.matchAll(/Cannot download "\[url\]", status (\d{3})(?::|\b)/g)].map((match) => Number(match[1])).filter((status) => status >= 400 && status <= 599);
+      const codes = [...safeMessage.matchAll(/\b(?:net::)?(ERR_[A-Z_]+|UND_ERR_[A-Z_]+|E[A-Z_]+)\b/g)].map((match) => match[1]);
+      const network = [...new Set(codes.filter((code) => NETWORK_CODES.has(code) || CHROMIUM_CODES.has(code)))];
+      const checksum = /\b(?:checksum mismatch|sha512 checksum mismatch)\b/i.test(safeMessage);
+      const missing = codes.includes("ENOENT");
+      const reasons = [statuses.length > 0, network.length > 0, checksum, missing].filter(Boolean).length;
+      const diagnostic = { kind: "differential download fallback", reason: "unknown" };
+      if (reasons === 1 && !/certificate|ERR_CERT_|ERR_SSL_|signature|integrity|unsafe/i.test(safeMessage)) {
+        if (statuses.length > 0 && new Set(statuses).size === 1) { diagnostic.reason = "http"; diagnostic.status = statuses[0]; }
+        else if (network.length === 1) { diagnostic.reason = "network"; diagnostic.code = network[0]; }
+        else if (checksum) diagnostic.reason = "checksum";
+        else if (missing) diagnostic.reason = "missing cache";
+      }
+      logProgress("[desktop-update]", JSON.stringify(diagnostic));
+    }
+  };
+  updater.logger = { info: upstreamLog, warn: upstreamLog, error: upstreamLog, debug: upstreamLog };
   updater.autoDownload = false;
   updater.autoInstallOnAppQuit = false;
   updater.allowDowngrade = false;
   updater.allowPrerelease = false;
   updater.disableWebInstaller = true;
   updater.disableDifferentialDownload = false;
-  const onError = (error) => log("[desktop-update]", error.message);
+  const onError = (error, kind) => log("[desktop-update]", JSON.stringify({ ...errorDetails(error).diagnostic, ...(kind === "cache cleanup failure" ? { kind } : {}) }));
+  const clearRetry = () => { if (retryTimer !== undefined) { clearRetryTimer(retryTimer); retryTimer = undefined; } };
+  const scheduleRetry = () => {
+    if (!started || stopped || abort.signal.aborted || retryTimer !== undefined) return;
+    const delay = Math.min(60_000 * 2 ** Math.min(retryAttempt++, 4), 15 * 60_000);
+    const handle = setRetryTimer(() => {
+      if (retryTimer !== handle) return;
+      retryTimer = undefined;
+      void check();
+    }, delay);
+    retryTimer = handle;
+    handle?.unref?.();
+  };
   updater.on("error", onError);
   const onProgress = ({ percent }) => {
     if (state.status === "downloading" && Number.isFinite(percent)) {
@@ -91,22 +160,27 @@ export function createUpdateService({ updater, token, abort = new AbortControlle
   };
   updater.on("download-progress", onProgress);
   async function check() {
-    if (stopped || busy || state.status === "downloaded") return;
+    if (stopped || abort.signal.aborted || busy || state.status === "downloaded") return;
+    clearRetry();
+    differentialStarted = false;
+    differentialFallback = false;
     busy = true;
     change({ status: "checking" });
     try {
       const result = await updater.checkForUpdates();
       if (stopped) return;
-      if (!result?.isUpdateAvailable) { change({ status: "idle" }); return; }
+      if (!result?.isUpdateAvailable) { retryAttempt = 0; change({ status: "idle" }); return; }
       change({ status: "downloading", version: result.updateInfo.version });
       const files = await updater.downloadUpdate(token);
+      if (differentialStarted && !differentialFallback) logProgress("[desktop-update]", JSON.stringify({ kind: "differential download completed" }));
       if (!files?.length) throw new Error("No verified update downloaded");
       const downloaded = await statFile(files[0]);
       if (downloaded.size !== result.updateInfo.files[0].size) throw new Error("Downloaded update size mismatch");
       downloadedUpdate = { ...result.updateInfo.files[0], path: files[0], installable: result.updateInfo.installable === true };
+      retryAttempt = 0;
       change({ status: "downloaded", version: result.updateInfo.version });
     } catch (error) {
-      if (!stopped) { onError(error); change({ status: "idle" }); }
+      if (!stopped && !abort.signal.aborted) { onError(error); change({ status: "idle" }); if (errorDetails(error).transient) scheduleRetry(); else retryAttempt = 0; }
     } finally { busy = false; }
   }
   return {
@@ -125,7 +199,7 @@ export function createUpdateService({ updater, token, abort = new AbortControlle
         downloadedUpdate = undefined;
         // 上游在同一进程内只检查缓存文件是否存在；清空后才能真正重新下载。
         try { await updater.downloadedUpdateHelper?.clear(); }
-        catch (cleanupError) { onError(cleanupError); }
+        catch (cleanupError) { onError(cleanupError, "cache cleanup failure"); }
         change({ status: "idle" });
         throw error;
       }
@@ -143,9 +217,9 @@ export function createUpdateService({ updater, token, abort = new AbortControlle
       if (!installEnabled || stopped || !verifiedForInstall || state.status !== "downloaded" || !downloadedUpdate?.installable) throw new Error("Update is not verified for installation");
       updater.quitAndInstall(true, true);
     },
-    start() { if (!stopped && !timer) { timer = setTimer(() => void check(), PERIOD); timer?.unref?.(); void check(); } },
+    start() { if (!stopped && !started) { started = true; timer = setTimer(() => void check(), PERIOD); timer?.unref?.(); void check(); } },
     check,
-    stop() { stopped = true; if (timer) clearTimer(timer); abort.abort(); token.cancel(); updater.removeListener("error", onError); updater.removeListener("download-progress", onProgress); },
+    stop() { stopped = true; if (timer) clearTimer(timer); clearRetry(); abort.abort(); token.cancel(); updater.removeListener("error", onError); updater.removeListener("download-progress", onProgress); },
   };
 }
 

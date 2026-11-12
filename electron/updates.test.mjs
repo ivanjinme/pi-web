@@ -67,10 +67,12 @@ function harness(overrides = {}, fileSize = info.files[0].size) {
   let cleared = 0;
   const states = [];
   const logs = [];
+  const retries = new Map();
+  let retryId = 0;
   const abort = new AbortController();
   const token = { cancelled: false, cancel() { this.cancelled = true; } };
-  const service = createUpdateService({ updater, token, abort, statFile: async () => ({ size: fileSize }), publish: (state) => states.push(state), log: (...args) => logs.push(args), setTimer: (fn, ms) => { assert.equal(ms, 4 * 3600 * 1000); tick = fn; return 1; }, clearTimer: () => cleared++ });
-  return { updater, service, states, token, abort, logs, tick: () => tick(), cleared: () => cleared };
+  const service = createUpdateService({ updater, token, abort, statFile: async () => ({ size: fileSize }), publish: (state) => states.push(state), log: (...args) => logs.push(args), logProgress: (...args) => logs.push(args), setTimer: (fn, ms) => { assert.equal(ms, 4 * 3600 * 1000); tick = fn; return 1; }, clearTimer: () => cleared++, setRetryTimer: (fn, ms) => { const id = ++retryId; retries.set(id, { fn, ms }); return id; }, clearRetryTimer: (id) => retries.delete(id) });
+  return { updater, service, states, token, abort, logs, retries, runRetry: () => { const [id, retry] = retries.entries().next().value; retries.delete(id); retry.fn(); }, tick: () => tick(), cleared: () => cleared };
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -126,11 +128,126 @@ test("check/download failures and no-update return hidden idle; next cycle retri
   }
 });
 
+test("transient retries back off, cap, and reset after a successful check", async () => {
+  let fail = true;
+  const h = harness({ async checkForUpdates() { this.checks++; if (fail) throw new TypeError("fetch failed", { cause: { code: "UND_ERR_CONNECT_TIMEOUT", address: "example.com" } }); return { isUpdateAvailable: false }; } });
+  h.service.start(); await flush();
+  for (const delay of [60_000, 120_000, 240_000, 480_000, 900_000, 900_000]) {
+    assert.equal(h.retries.size, 1); assert.equal([...h.retries.values()][0].ms, delay);
+    h.runRetry(); await flush();
+  }
+  fail = false; h.runRetry(); await flush(); assert.equal(h.retries.size, 0);
+  fail = true; h.tick(); await flush(); assert.equal([...h.retries.values()][0].ms, 60_000);
+  h.service.stop(); assert.equal(h.retries.size, 0);
+});
+
+test("manual checks cancel pending retries, do not overlap, and do not schedule before start", async () => {
+  let finish;
+  const error = Object.assign(new Error("network"), { code: "ECONNRESET" });
+  const h = harness({ checkForUpdates() { this.checks++; return new Promise((resolve, reject) => { finish = { resolve, reject }; }); } });
+  const first = h.service.check(); finish.reject(error); await first; assert.equal(h.retries.size, 0);
+  h.service.start(); finish.reject(error); await flush(); assert.equal(h.retries.size, 1);
+  const stale = [...h.retries.values()][0].fn;
+  const manual = h.service.check(); assert.equal(h.retries.size, 0);
+  stale(); h.tick(); await h.service.check(); assert.equal(h.updater.checks, 3);
+  finish.resolve({ isUpdateAvailable: false }); await manual; assert.equal(h.retries.size, 0);
+  h.service.stop(); stale(); assert.equal(h.updater.checks, 3);
+});
+
+test("download network failures retry; security and unknown errors do not", async () => {
+  for (const error of [new Error("bad signature"), new Error("hash mismatch"), new Error("Unsafe URL"), new Error("unknown"), new Error("Manifest HTTP 404")]) {
+    const h = harness({ async checkForUpdates() { throw error; } }); h.service.start(); await flush(); assert.equal(h.retries.size, 0); h.service.stop();
+  }
+  for (const error of [Object.assign(new Error("download failed"), { code: "ETIMEDOUT" }), new Error("Manifest HTTP 503"), new Error("Manifest HTTP 429")]) {
+    const h = harness({ async downloadUpdate() { throw error; } }); h.service.start(); await flush(); assert.equal(h.retries.size, 1); h.service.stop();
+  }
+});
+
+test("network diagnostics never log signed URL or credentials", async () => {
+  const error = new TypeError("fetch failed https://user:secret@example.com/path?token=secret", { cause: { code: "UND_ERR_CONNECT_TIMEOUT", address: "example.com" } });
+  const h = harness({ async checkForUpdates() { this.emit("error", error); throw error; } });
+  h.service.start(); await flush();
+  assert.deepEqual(JSON.parse(h.logs[0][1]), { name: "TypeError", causeCode: "UND_ERR_CONNECT_TIMEOUT", address: "example.com", kind: "transient" });
+  assert.doesNotMatch(JSON.stringify(h.logs), /secret|\/path|token/);
+  h.service.stop();
+});
+
+test("real updater HTTP and Chromium failures retry without leaking URLs; security errors fail closed", async () => {
+  const url = "https://user:secret@example.com/file.exe?token=secret";
+  for (const error of [new Error(`Cannot download "${url}", status 503: Service Unavailable`), new Error(`Cannot download "${url}", status 429: Too Many Requests`), new Error("net::ERR_NAME_NOT_RESOLVED"), new Error("net::ERR_CONNECTION_RESET"), new Error("Request timed out"), Object.assign(new Error(`HTTP error ${url}`), { statusCode: 503 }), Object.assign(new Error("timed out"), { name: "TimeoutError" })]) {
+    const h = harness({ async downloadUpdate() { this.emit("error", error); throw error; } });
+    assert.equal(typeof h.updater.logger.error, "function");
+    h.service.start(); await flush(); assert.equal(h.retries.size, 1);
+    assert.doesNotMatch(JSON.stringify(h.logs), /secret|file\.exe|token/);
+    assert.equal(JSON.parse(h.logs[0][1]).kind, "transient"); h.service.stop();
+  }
+  for (const error of [new Error("net::ERR_CERT_AUTHORITY_INVALID"), new Error("net::ERR_SSL_PROTOCOL_ERROR"), new Error(`Cannot download "${url}", status 403: Forbidden`), Object.assign(new Error("checksum mismatch"), { code: "ECONNRESET" }), Object.assign(new Error("certificate error"), { statusCode: 503 })]) {
+    const h = harness({ async checkForUpdates() { throw error; } }); h.service.start(); await flush();
+    assert.equal(h.retries.size, 0); assert.doesNotMatch(JSON.stringify(h.logs), /secret|file\.exe|token/); h.service.stop();
+  }
+});
+
+test("Node DNS and socket causes and the actual timeout DOMException retry", async () => {
+  for (const error of [new TypeError("fetch failed", { cause: { code: "ENOTFOUND" } }), new TypeError("fetch failed", { cause: { code: "UND_ERR_SOCKET" } }), new DOMException("The operation was aborted due to timeout", "TimeoutError")]) {
+    const h = harness({ async checkForUpdates() { throw error; } }); h.service.start(); await flush();
+    assert.equal(h.retries.size, 1); assert.equal(JSON.parse(h.logs[0][1]).kind, "transient"); h.service.stop();
+  }
+});
+
+test("fixed diagnostics distinguish malformed metadata and missing files without logging messages", async () => {
+  for (const [error, kind] of [[new SyntaxError("Unexpected secret JSON"), "malformed JSON"], [new Error("Manifest too large"), "manifest too large"], [new Error("Invalid stable update manifest"), "invalid update metadata"], [new Error("Invalid EXE metadata"), "invalid update metadata"], [new Error("No verified update downloaded"), "missing downloaded files"]]) {
+    const h = harness({ async checkForUpdates() { throw error; } }); h.service.start(); await flush();
+    assert.equal(JSON.parse(h.logs[0][1]).kind, kind); assert.doesNotMatch(JSON.stringify(h.logs), /secret|Invalid EXE metadata/); assert.equal(h.retries.size, 0); h.service.stop();
+  }
+});
+
+test("upstream differential logs expose only fixed progress and fallback classifications", async () => {
+  const secret = "https://user:secret@example.com/a?token=secret";
+  for (const fallback of [false, true]) {
+    const h = harness({ async downloadUpdate() {
+      this.logger.info(`Differential download: ${secret}`);
+      this.logger.warn(`Other message ${secret}`);
+      if (fallback) this.logger.error(`Cannot download differentially, fallback to full download: ${secret}`);
+      return ["verified.exe"];
+    } });
+    h.service.start(); await flush();
+    assert.deepEqual(h.logs.map((args) => JSON.parse(args[1]).kind), ["differential download started", fallback ? "differential download fallback" : "differential download completed"]);
+    assert.doesNotMatch(JSON.stringify(h.logs), /secret|token|example/); h.service.stop();
+  }
+});
+
+test("differential fallback reports only allowlisted reasons from upstream stacks through caller log", async () => {
+  const secret = "https://user:secret@example.com/blockmap?token=secret";
+  const cases = [
+    [`Error: Cannot download "${secret}", status 404: Not Found\n    at download (${secret})`, { reason: "http", status: 404 }],
+    [`Error: net::ERR_CONNECTION_RESET at ${secret}`, { reason: "network", code: "ERR_CONNECTION_RESET" }],
+    [`Error: checksum mismatch at ${secret}`, { reason: "checksum" }],
+    [`Error: ENOENT: no such file, open '${secret}'`, { reason: "missing cache" }],
+    [`Error: Cannot download "${secret}", status 404: checksum mismatch`, { reason: "unknown" }],
+    [`Error: unrecognized ${secret}`, { reason: "unknown" }],
+  ];
+  for (const [reason, expected] of cases) {
+    const logs = [];
+    const updater = Object.assign(new EventEmitter(), { async checkForUpdates() { return { isUpdateAvailable: false }; } });
+    const service = createUpdateService({ updater, token: { cancel() {} }, log: (...args) => logs.push(args) });
+    updater.logger.error(`Cannot download differentially, fallback to full download: ${reason}`);
+    assert.deepEqual(JSON.parse(logs[0][1]), { kind: "differential download fallback", ...expected });
+    assert.doesNotMatch(JSON.stringify(logs), /secret|token|example|blockmap/); service.stop();
+  }
+});
+
+test("an aborted service does not retry a timeout", async () => {
+  let reject;
+  const h = harness({ checkForUpdates() { return new Promise((_resolve, fail) => { reject = fail; }); } });
+  h.service.start(); h.abort.abort(); reject(Object.assign(new Error("timeout"), { name: "TimeoutError" })); await flush();
+  assert.equal(h.retries.size, 0); h.service.stop();
+});
+
 test("a signed size mismatch never becomes ready to restart", async () => {
   const h = harness({}, 1);
   h.service.start(); await flush();
   assert.equal(h.service.getState().status, "idle");
-  assert.match(h.logs[0][1], /size mismatch/);
+  assert.equal(JSON.parse(h.logs[0][1]).kind, "size mismatch");
   assert.ok(!h.states.some((state) => state.status === "downloaded"));
   h.service.stop();
 });
