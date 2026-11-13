@@ -35,7 +35,7 @@ export function isExistingPathWithinRoots(target: string, roots: Set<string>): b
     try {
       realRoots.add(realpathSync(root));
     } catch {
-      // Ignore stale roots derived from removed sessions or worktrees.
+      // 忽略已不存在的会话目录。
     }
   }
   return isPathWithinRoots(realTarget, realRoots);

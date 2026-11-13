@@ -372,16 +372,15 @@ export function AppShell() {
     return () => controller.abort();
   }, [initialNavigation]);
 
-  const handleCwdChange = useCallback((cwd: string | null, projectRoot?: string | null) => {
+  const handleCwdChange = useCallback((cwd: string | null) => {
     setActiveCwd(cwd);
     if (!cwd) {
       activeProjectRootRef.current = null;
       dispatchArtifact({ type: "reset" });
       return;
     }
-    const newProject = projectRoot ?? cwd;
-    const currentProject = activeProjectRootRef.current
-      ?? (selectedSession ? (selectedSession.projectRoot ?? selectedSession.cwd) : null);
+    const newProject = cwd;
+    const currentProject = activeProjectRootRef.current ?? selectedSession?.cwd;
     activeProjectRootRef.current = newProject;
 
     // Keep the project identity in sync during the initial URL restore without
@@ -390,9 +389,6 @@ export function AppShell() {
       suppressCwdBumpRef.current = false;
       return;
     }
-    // Worktrees of one repo share a project root. Moving the effective cwd
-    // within the same project (e.g. switching worktree, or clicking a session
-    // that lives in another worktree) must not close the open session.
     if (currentProject === newProject) {
       return;
     }
@@ -414,7 +410,7 @@ export function AppShell() {
   }, [router, selectedSession]);
 
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
-    const nextProject = session.projectRoot ?? session.cwd;
+    const nextProject = session.cwd;
     const currentProject = activeProjectRootRef.current;
     if (currentProject && currentProject !== nextProject) {
       dispatchArtifact({ type: "reset" });
@@ -469,21 +465,6 @@ export function AppShell() {
     activeCwd,
   });
 
-  // Client-built transient SessionInfo (new session / fork) lacks the
-  // server-computed projectRoot, which the same-project check in
-  // handleCwdChange relies on. Hydrate it from the session list so switching
-  // worktrees right after creating a session doesn't close the chat.
-  const hydrateSelectedSession = useCallback((sessionId: string) => {
-    void fetch("/api/sessions")
-      .then((r) => (r.ok ? (r.json() as Promise<{ sessions: SessionInfo[] }>) : null))
-      .then((d) => {
-        const full = d?.sessions.find((s) => s.id === sessionId);
-        if (!full) return;
-        setSelectedSession((prev) => (prev && prev.id === sessionId && !prev.projectRoot ? full : prev));
-      })
-      .catch(() => {});
-  }, []);
-
   // Called by ChatWindow when the first message creates the real pi session.
   const handleSessionCreated = useCallback((session: SessionInfo) => {
     setNewTaskDraftId(null);
@@ -491,9 +472,8 @@ export function AppShell() {
     setNewSessionCwd(null);
     setSelectedSession(session);
     setRefreshKey((k) => k + 1);
-    hydrateSelectedSession(session.id);
     router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
-  }, [router, hydrateSelectedSession]);
+  }, [router]);
 
   const handleAgentEnd = useCallback(() => {
     setRefreshKey((k) => k + 1);
@@ -515,9 +495,8 @@ export function AppShell() {
       ...(prev ?? { path: "", cwd: "", created: "", modified: "", messageCount: 0, firstMessage: "" }),
       id: newSessionId,
     }));
-    hydrateSelectedSession(newSessionId);
     router.replace(`?session=${encodeURIComponent(newSessionId)}`, { scroll: false });
-  }, [router, hydrateSelectedSession]);
+  }, [router]);
 
   const handleInitialRestoreDone = useCallback(() => {
     setInitialSessionRestored(true);
@@ -741,7 +720,6 @@ export function AppShell() {
     setSettingsContext({
       cwd: projectTrustCwd,
       projectName: projectTrustCwd ? getFileName(projectTrustCwd) || projectTrustCwd : null,
-      branch: selectedSession?.worktreeBranch,
     });
     if (isMobile) setSidebarOpen(false);
   }

@@ -69,7 +69,7 @@ test("closing the right panel or collapsing Explorer keeps the file tree mounted
 });
 
 test("cross-project navigation clears open file artifacts", () => {
-  assert.match(selectSessionSource, /const nextProject = session\.projectRoot \?\? session\.cwd;/);
+  assert.match(selectSessionSource, /const nextProject = session\.cwd;/);
   assert.match(selectSessionSource, /if \(currentProject && currentProject !== nextProject\) \{\s*dispatchArtifact\(\{ type: "reset" \}\);\s*\}/);
   assert.ok(
     selectSessionSource.indexOf('dispatchArtifact({ type: "reset" })') < selectSessionSource.indexOf("activeProjectRootRef.current = nextProject"),

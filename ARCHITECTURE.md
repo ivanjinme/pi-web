@@ -34,7 +34,7 @@ Target architecture. Code dependencies, not process layout:
 | Browser run state, reconnect, branch navigation | `hooks/useAgentSession.ts` |
 | Streaming assembly / tool-call adaptation | `lib/streaming-message.ts`, `lib/normalize.ts` |
 | Tool selection | `lib/tool-presets.ts` |
-| Project/worktree identity | `lib/worktree.ts`, `docs/worktrees.md` |
+| Project identity (session cwd) | `lib/session-reader.ts`, `components/SessionSidebar.tsx` |
 | Project trust | `lib/project-trust.ts`, `lib/rpc-manager.ts` |
 | File authorization | `lib/file-access.ts`, `lib/path-security.ts` |
 | Referenced external files | `lib/session-file-references.ts` |

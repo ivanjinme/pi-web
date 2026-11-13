@@ -315,12 +315,6 @@ export interface SessionInfo {
   /** 列表先返回轻量目录，仅可见 thread 再加载标题。 */
   titleLoaded?: boolean;
   parentSessionId?: string; // set if this session was forked from another
-  /** Main repo root shared by all worktrees of this cwd (cwd itself for non-git dirs).
-   *  Always set by the server; optional because the client builds transient
-   *  SessionInfo objects before the first refresh. Fall back to cwd. */
-  projectRoot?: string;
-  /** Branch name when cwd is a linked git worktree (not the main checkout) */
-  worktreeBranch?: string;
 }
 
 export interface SessionContext {

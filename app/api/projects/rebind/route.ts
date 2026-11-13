@@ -5,7 +5,6 @@ import { hasBusyRpcSessionForCwds, destroyRpcSessionsForCwds } from "@/lib/rpc-m
 import { invalidateSessionListCache, listAllSessions } from "@/lib/session-reader";
 import { sessionPathKey } from "@/lib/session-path";
 import { rebindPinnedProject } from "@/lib/sidebar-pins";
-import { invalidateProjectCache } from "@/lib/worktree";
 import { isApiRequestAllowed } from "@/lib/request-security";
 
 interface RebindRequest {
@@ -52,7 +51,7 @@ export async function POST(request: NextRequest) {
 
     const sessions = await listAllSessions();
     const matching = sessions.filter((session) =>
-      session.cwd && sessionPathKey(session.projectRoot ?? session.cwd) === oldKey
+      session.cwd && sessionPathKey(session.cwd) === oldKey
     );
     const involvedCwds = new Map<string, string>([[oldKey, oldRoot]]);
     for (const session of matching) involvedCwds.set(sessionPathKey(session.cwd), session.cwd);
@@ -88,7 +87,6 @@ export async function POST(request: NextRequest) {
 
     replaceAllowedFileRoot(oldRoot, newRoot);
     invalidateSessionListCache();
-    invalidateProjectCache();
 
     return NextResponse.json({ ok: true, migratedSessions: prepared.length, cwd: newRoot });
   } catch (error) {

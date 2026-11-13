@@ -10,8 +10,8 @@ export function selectVisible(sessions, pins = [], projectKey = (path) => path) 
   const pinnedProjects = new Set(pins.filter((p) => p.type === "project").map((p) => projectKey(p.id)));
   const groups = new Map();
   for (const session of [...sessions].sort((a, b) => Number(b.modified) - Number(a.modified))) {
-    if (!groups.has(session.projectRoot)) groups.set(session.projectRoot, []);
-    groups.get(session.projectRoot).push(session);
+    if (!groups.has(session.cwd)) groups.set(session.cwd, []);
+    groups.get(session.cwd).push(session);
   }
   const selected = new Map(sessions.filter((s) => pinnedSessions.has(s.id)).map((s) => [s.id, s]));
   let unpinnedProjects = 0;
@@ -45,7 +45,6 @@ async function main() {
   const sdkImportMs = Math.round(performance.now() - started);
   const jiti = createJiti(import.meta.url);
   const reader = await jiti.import("../lib/session-reader.ts");
-  const { resolveProject, invalidateProjectCache } = await jiti.import("../lib/worktree.ts");
   const { readSidebarPins } = await jiti.import("../lib/sidebar-pins.ts");
   const { projectPathKey } = await jiti.import("../lib/project-folders.ts");
   const pins = readSidebarPins();
@@ -54,15 +53,12 @@ async function main() {
   let titles;
 
   async function fullScan() {
-    invalidateProjectCache();
     const start = performance.now();
     baseline = await SessionManager.listAll();
-    await Promise.all([...new Set(baseline.map((s) => s.cwd))].map(resolveProject));
     return Math.round(performance.now() - start);
   }
 
   async function selectiveScan() {
-    invalidateProjectCache();
     reader.invalidateSessionListCache();
     let start = performance.now();
     catalog = await reader.listAllSessions();

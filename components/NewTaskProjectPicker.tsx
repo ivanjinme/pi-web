@@ -38,7 +38,7 @@ function buildProjectEntries(localRoots: string[], sessions: SessionInfo[] = [])
   const byRoot = new Map<string, ProjectEntry>();
   for (const root of localRoots) byRoot.set(normalizeRoot(root), { root, modified: "" });
   for (const session of sessions) {
-    const root = session.projectRoot ?? session.cwd;
+    const root = session.cwd;
     const key = normalizeRoot(root);
     const existing = byRoot.get(key);
     if (!existing || session.modified > existing.modified) {

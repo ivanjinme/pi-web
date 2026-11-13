@@ -1627,10 +1627,6 @@ span.linenumber {
   box-shadow: inset 2px 0 #ef4444;
 }
 
-.session-worktree-meta {
-  display: none !important;
-}
-
 /* Desktop sidebar: animate width */
 @media (min-width: 641px) {
   .sidebar-overlay-backdrop {

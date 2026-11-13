@@ -10,7 +10,6 @@ import type { AgentMessage, SessionEntry, SessionInfo, SessionContext } from "./
 import type { SessionEntry as PiSessionEntry } from "@earendil-works/pi-coding-agent";
 import { normalizeToolCalls } from "./normalize";
 import { sessionPathKey } from "./session-path";
-import { resolveProject, type ProjectInfo } from "./worktree";
 
 export { getAgentDir };
 
@@ -18,17 +17,8 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
   const files = await discoverSessionFiles(join(getAgentDir(), "sessions"));
   const pathToId = new Map(files.map((file) => [sessionPathKey(file.path), file.header.id]));
 
-  // Resolve each unique cwd to its project root (main repo shared by all
-  // worktrees). resolveProject caches per-cwd, so this is cheap after warmup.
-  const uniqueCwds = [...new Set(files.map((file) => file.header.cwd).filter(Boolean))];
-  const projectByCwd = new Map<string, ProjectInfo>();
-  await Promise.all(uniqueCwds.map(async (cwd) => {
-    projectByCwd.set(cwd, await resolveProject(cwd));
-  }));
-
   return files.map(({ path, header, modified }) => {
     cacheSessionPath(header.id, path);
-    const project = header.cwd ? projectByCwd.get(header.cwd) : undefined;
     return {
       path,
       id: header.id,
@@ -38,8 +28,6 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
       firstMessage: "",
       titleLoaded: false,
       parentSessionId: header.parentSession ? pathToId.get(sessionPathKey(header.parentSession)) : undefined,
-      projectRoot: project?.projectRoot ?? header.cwd,
-      ...(project?.isWorktree && project.branch ? { worktreeBranch: project.branch } : {}),
     };
   });
 }
@@ -47,8 +35,7 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
 export async function listAllSessions(): Promise<SessionInfo[]> {
   const generation = globalThis.__piSessionListGeneration ?? 0;
 
-  // Return cached result if still fresh (avoids re-scanning session files
-  // and re-spawning git processes on every page load).
+  // Return cached result if still fresh (avoids re-scanning session files).
   if (globalThis.__piSessionListCache && Date.now() - globalThis.__piSessionListCache.ts < SESSION_LIST_CACHE_TTL_MS) {
     return globalThis.__piSessionListCache.data;
   }
