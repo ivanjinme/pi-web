@@ -20,7 +20,7 @@ export function ArtifactHome({ onOpen }: { onOpen: (kind: "files" | "changes") =
         const available = kind === "files" || kind === "changes";
         return (
           <button key={kind} type="button" className="artifact-home-entry" disabled={!available} onClick={() => { if (available) onOpen(kind); }}>
-            <span className="artifact-home-icon"><ArtifactIcon kind={kind} size={24} /></span>
+            <span className={`artifact-home-icon artifact-home-icon--${kind}`}><ArtifactIcon kind={kind} size={22} /></span>
             <span className="artifact-home-text">
               <span className="artifact-home-title">{title}</span>
               <span className="artifact-home-description">{description}</span>
