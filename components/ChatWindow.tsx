@@ -380,6 +380,7 @@ export function ChatWindow({ session, newSessionCwd, newTaskDraftId, showProject
       onFollowUp={agentRunning ? handleFollowUp : undefined}
       onPromptWithStreamingBehavior={agentRunning ? handlePromptWithStreamingBehavior : undefined}
       isStreaming={sessionBusy}
+      contextUsage={visibleMessages.length > 0 ? contextUsage : null}
       model={displayModelValue}
       isAutoModelSelection={isAutoModelSelection}
       modelNames={modelNames}

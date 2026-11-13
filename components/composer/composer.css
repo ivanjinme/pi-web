@@ -11,7 +11,7 @@
 }
 
 .composer-editor {
-  min-height: 24px;
+  min-height: 2lh;
   max-height: 200px;
   overflow: auto;
   outline: none;
@@ -21,6 +21,82 @@
 
 .composer-paragraph {
   margin: 0;
+}
+
+/* 空会话外层已提供栏宽与留白，避免输入框重复缩进。 */
+.chat-content-gutter .chat-composer { padding-inline: 0; }
+
+.composer-shell {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--bg);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 3%), 0 8px 24px -12px rgb(15 23 42 / 8%);
+}
+
+.composer-shell-editor {
+  min-width: 0;
+  padding: 10px 16px 20px;
+}
+
+.composer-shell-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 10px 8px 8px;
+}
+
+.composer-shell-permission {
+  flex: 0 0 auto;
+  min-width: min-content;
+}
+
+.composer-shell-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+}
+
+.composer-shell-actions > .composer-model-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.composer-send-button {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--text);
+  color: var(--bg);
+  cursor: pointer;
+}
+
+.composer-send-button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.composer-send-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .composer-shell-footer { flex-wrap: wrap; }
+  .composer-shell-actions { flex: 1; gap: 2px; min-width: min(100%, 176px); }
+  .composer-shell-actions:has(.composer-context-ring) { min-width: min(100%, 204px); }
 }
 
 .composer-placeholder {

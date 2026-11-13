@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "../components/composer/composer.css";
+@import "../components/composer/ComposerControls.css";
 
 @theme {
   --color-bg: var(--bg);
