@@ -1,51 +1,61 @@
 # Commands
 
-Run from the repository root. Use project-local binaries only.
+Repo root · Bash / Git Bash · stop on failure.
 
 ## Development
 
 ```bash
-npm run dev          # Desktop :8888 (alias: dev:desktop)
-npm run dev:web      # Web :8888
+npm run dev
+npm run dev:web
+```
+
+## Checks
+
+```bash
 node --test electron/*.test.mjs
 node_modules/.bin/tsc --noEmit
 npm run lint
 ```
 
-Never run `next build` during development; it pollutes `.next/`.
+## Publish Web UI (npm)
 
-## Publish desktop
-
-One desktop release command builds the complete installer update; there is no
-independent business ZIP/npm update, shell-digest release-kind gate or shell
-baseline to commit.
+Committed source · clean worktree · `v*` triggers npm workflow.
 
 ```bash
-npm run setup:desktop-updates    # once; signing key lives outside the repo
-npm run release:desktop          # tests, isolated Next build, NSIS, signed metadata
-```
-
-Clients read the signed `desktop-update-manifest.json` directly. No legacy
-index or compatibility adapter is generated.
-
-The command uses `--publish never`: no commit, tag, upload, install or Latest
-change. Public upload/Latest changes require explicit approval. Before any upload,
-ensure the build matches the committed source/target commit. Upload only the
-explicit current-version EXE, paired blockmap, signed manifest and
-`SHA256SUMS.txt` listed in `docs/desktop-release.md`. Never use a dist
-wildcard: old ZIPs/installers may remain. Never `--clobber` public assets; bump the
-version instead. Ed25519 metadata signing is not Windows Authenticode signing.
-
-Details and controlled validation limits: `docs/desktop-release.md`.
-
-## Publish npm (web/CLI distribution, not desktop updating)
-
-```bash
+set -e
 npm version patch --no-git-tag-version
 VERSION=$(node -p "require('./package.json').version")
-git add package.json package-lock.json && git commit -m "Release v$VERSION"
-git tag "v$VERSION" && git push origin main "v$VERSION"
+git add package.json package-lock.json
+git commit -m "Release v$VERSION"
+git tag "v$VERSION"
+git push origin main "v$VERSION"
 ```
 
-Tag `v*` triggers `.github/workflows/publish.yml`. Never run `npm run release`.
-Desktop tags are `desktop-v*`, never `v*`.
+## Publish Desktop
+
+Windows x64 · committed source · clean worktree · signing configured · `gh` authenticated.
+
+```bash
+set -e
+npm version patch --no-git-tag-version
+VERSION=$(node -p "require('./package.json').version")
+TAG="desktop-v$VERSION"
+git add package.json package-lock.json
+git commit -m "Release desktop $VERSION"
+COMMIT=$(git rev-parse HEAD)
+npm run release:desktop
+(cd build/desktop/dist && sha256sum -c SHA256SUMS.txt)
+git push origin main
+
+gh release create "$TAG" --repo ivanjinme/weclio --draft --target "$COMMIT" \
+  --title "Weclio desktop $VERSION" --notes "Desktop app update." \
+  "build/desktop/dist/Weclio-$VERSION-x64-Setup.exe" \
+  "build/desktop/dist/Weclio-$VERSION-x64-Setup.exe.blockmap" \
+  "build/desktop/dist/desktop-update-manifest.json" \
+  "build/desktop/dist/SHA256SUMS.txt"
+
+# Verify draft assets, signature, version, source before publishing
+gh release edit "$TAG" --repo ivanjinme/weclio --draft=false --latest
+```
+
+No `next build` in dev directory. No `npm run release`. No asset wildcards / `--clobber`.
