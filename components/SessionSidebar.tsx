@@ -517,6 +517,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
   const [sessionSearch, setSessionSearch] = useState("");
   const [projectsOpen, setProjectsOpen] = useState(true);
+  const [tasksOpen, setTasksOpen] = useState(true);
+  const [taskCreationError, setTaskCreationError] = useState<string | null>(null);
+  const [defaultWorkspace, setDefaultWorkspace] = useState<string | null>(null);
   const [allProjectsVisible, setAllProjectsVisible] = useState(false);
   const [projectVisibleCounts, setProjectVisibleCounts] = useState<Record<string, number>>({});
   const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({});
@@ -585,10 +588,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     const request = ++listRequestRef.current;
     try {
       if (showLoading) setLoading(true);
-      const res = await fetch("/api/sessions");
+      const [res, workspaceResponse] = await Promise.all([
+        fetch("/api/sessions"),
+        fetch("/api/cwd/default"),
+      ]);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!workspaceResponse.ok) throw new Error(`HTTP ${workspaceResponse.status}`);
       const data = await res.json() as { sessions: SessionInfo[]; runningSessionIds?: string[] };
+      const workspace = await workspaceResponse.json() as { cwd: string };
       if (request !== listRequestRef.current) return;
+      setDefaultWorkspace(workspace.cwd);
       setAllSessions((previous) => {
         const byId = new Map(previous.map((session) => [session.id, session]));
         return data.sessions.map((session) => {
@@ -892,7 +901,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     const sessionsById = new Map(allSessions.map((session) => [session.id, session]));
     return pins.flatMap<{ pin: SidebarPin; session: SessionInfo | undefined; label: string }>((pin) => {
       if (pin.type === "project") {
-        if (isProjectFolderHidden(pin.id, hiddenProjectFolders)) return [];
+        if (isProjectFolderHidden(pin.id, hiddenProjectFolders) || projectPathKey(pin.id) === projectPathKey(defaultWorkspace ?? "")) return [];
         const label = projectLabels[pin.id] || projectDefaultLabel(pin.id);
         const group = projectGroups.find((group) => projectPathKey(group.root) === projectPathKey(pin.id));
         if (normalizedSessionSearch && ![label, pin.id].some((value) => value.toLowerCase().includes(normalizedSessionSearch)) && !group?.sessions.length) return [];
@@ -904,9 +913,22 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       const root = session.cwd;
       return [{ pin, session, label: projectLabels[root] || projectDefaultLabel(root) }];
     });
-  }, [allSessions, hiddenProjectFolders, normalizedSessionSearch, pins, projectGroups, projectLabels]);
+  }, [allSessions, defaultWorkspace, hiddenProjectFolders, normalizedSessionSearch, pins, projectGroups, projectLabels]);
 
-  const unpinnedProjectGroups = useMemo(() => projectGroups.filter((group) => !pinnedProjects.has(projectPathKey(group.root))), [pinnedProjects, projectGroups]);
+  const tasksGroup = useMemo(() => {
+    if (!defaultWorkspace) return null;
+    const groups = projectGroups.filter((group) => projectPathKey(group.root) === projectPathKey(defaultWorkspace));
+    const sessions = groups.flatMap((group) => group.sessions);
+    return {
+      root: defaultWorkspace,
+      sessions,
+      roots: buildSessionTree(sessions),
+      modified: groups[0]?.modified ?? "",
+    };
+  }, [defaultWorkspace, projectGroups]);
+  const unpinnedProjectGroups = useMemo(() => projectGroups.filter((group) =>
+    projectPathKey(group.root) !== projectPathKey(defaultWorkspace ?? "") && !pinnedProjects.has(projectPathKey(group.root))
+  ), [defaultWorkspace, pinnedProjects, projectGroups]);
   const visibleProjectGroups = useMemo(() => {
     if (normalizedSessionSearch || allProjectsVisible || unpinnedProjectGroups.length <= 5) return unpinnedProjectGroups;
 
@@ -923,6 +945,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       for (const session of allSessions) ids.add(session.id);
     } else {
       const groups = projectsOpen ? [...visibleProjectGroups] : [];
+      if (tasksOpen && tasksGroup) groups.push(tasksGroup);
       if (pinsOpen) {
         for (const { pin, session } of visiblePins) {
           if (session) ids.add(session.id);
@@ -933,14 +956,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         }
       }
       for (const group of groups) {
-        if (collapsedProjects[group.root]) continue;
+        if (group !== tasksGroup && collapsedProjects[group.root]) continue;
         const roots = visibleThreadRoots(group, projectVisibleCounts[group.root] ?? 5, selectedSessionId);
         for (const id of threadTitleIds(roots)) ids.add(id);
       }
     }
     return allSessions.filter((session) => ids.has(session.id) && !session.titleLoaded)
       .map(({ id, modified }) => ({ id, modified }));
-  }, [allSessions, normalizedSessionSearch, projectsOpen, visibleProjectGroups, pinsOpen, visiblePins, projectGroups, projectVisibleCounts, collapsedProjects, selectedSessionId]));
+  }, [allSessions, normalizedSessionSearch, projectsOpen, visibleProjectGroups, tasksOpen, tasksGroup, pinsOpen, visiblePins, projectGroups, projectVisibleCounts, collapsedProjects, selectedSessionId]));
 
   useEffect(() => {
     const requested = JSON.parse(titleRequestKey) as { id: string; modified: string }[];
@@ -980,9 +1003,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     if (sessionSearchOpen) sessionSearchRef.current?.focus();
   }, [sessionSearchOpen]);
 
-  function renderProjectGroup(group: { root: string; sessions: SessionInfo[]; roots: SessionTreeNode[] }) {
+  function renderProjectGroup(group: { root: string; sessions: SessionInfo[]; roots: SessionTreeNode[] }, isTasks = false) {
     const roots = group.roots;
-    const isCollapsed = collapsedProjects[group.root] ?? false;
+    const isCollapsed = isTasks ? !tasksOpen : collapsedProjects[group.root] ?? false;
     const visibleCount = projectVisibleCounts[group.root] ?? 5;
     const hasMore = roots.length > visibleCount;
     const visibleRoots = visibleThreadRoots(group, visibleCount, selectedSessionId);
@@ -991,8 +1014,32 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     const isPinned = pinnedProjects.has(projectPathKey(group.root));
     const isActive = !selectedSessionId && highlightedProjectRoot === group.root;
     return (
-      <section className="project-section" key={group.root}>
-        <div className={`project-row${isActive ? " is-active" : ""}`}>
+      <section className={isTasks ? "tasks-section" : "project-section"} key={group.root} aria-label={isTasks ? "Tasks" : undefined}>
+        {isTasks ? (
+          <div className="projects-heading sidebar-section-heading">
+            <button type="button" className="projects-heading-label" onClick={() => {
+              setTasksOpen((open) => !open);
+              setProjectVisibleCounts((previous) => ({ ...previous, [group.root]: 5 }));
+            }} aria-expanded={tasksOpen}>
+              <svg className={tasksOpen ? "is-open" : ""} width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="4 2.5 8 6 4 9.5" />
+              </svg>
+              <span>Tasks</span>
+            </button>
+            <button type="button" className="projects-add" onClick={async () => {
+              setTaskCreationError(null);
+              try {
+                const response = await fetch("/api/cwd/default", { method: "POST" });
+                const data = await response.json() as { cwd?: string; error?: string };
+                if (!response.ok || !data.cwd) throw new Error(data.error ?? `HTTP ${response.status}`);
+                setTasksOpen(true);
+                createNewSession(data.cwd);
+              } catch (error) {
+                setTaskCreationError(String(error));
+              }
+            }} aria-label="New thread in Tasks">+</button>
+          </div>
+        ) : <div className={`project-row${isActive ? " is-active" : ""}`}>
           <button type="button" className="project-row-main" onClick={() => {
             setCollapsedProjects((previous) => ({ ...previous, [group.root]: !isCollapsed }));
             setProjectVisibleCounts((previous) => ({ ...previous, [group.root]: 5 }));
@@ -1018,8 +1065,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           <button type="button" className="project-new-task" onClick={() => createNewSession(group.root)} aria-label={`New task in ${label}`}>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
           </button>
-        </div>
-        {!isCollapsed && <div className="project-sessions">
+        </div>}
+        {!isCollapsed && <div className={isTasks ? "tasks-sessions" : "project-sessions"}>
           {visibleRoots.map((node) => (
             <SessionTreeItem
               key={node.session.id}
@@ -1214,27 +1261,25 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             ))}
           </section>
         )}
+        {taskCreationError && <div role="alert" className="sidebar-error">{taskCreationError}</div>}
+        {!loading && !error && tasksGroup && renderProjectGroup(tasksGroup, true)}
         {!loading && !error && (
-          <div className="projects-heading">
-            {unpinnedProjectGroups.length === 0 ? (
-              <span className="projects-heading-empty">Projects</span>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setProjectsOpen((open) => !open)}
-                className="projects-heading-label"
-                aria-expanded={projectsOpen}
-              >
-                <span>Projects</span>
-                <svg className={projectsOpen ? "is-open" : ""} width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <polyline points="4 2.5 8 6 4 9.5" />
-                </svg>
-              </button>
-            )}
+          <div className="projects-heading sidebar-section-heading">
+            <button
+              type="button"
+              onClick={() => setProjectsOpen((open) => !open)}
+              className="projects-heading-label"
+              aria-expanded={projectsOpen}
+            >
+              <svg className={projectsOpen ? "is-open" : ""} width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="4 2.5 8 6 4 9.5" />
+              </svg>
+              <span>Projects</span>
+            </button>
             <button type="button" onClick={handleCustomPathClick} className="projects-add" aria-label="New project">+</button>
           </div>
         )}
-        {projectsOpen && visibleProjectGroups.map(renderProjectGroup)}
+        {projectsOpen && visibleProjectGroups.map((group) => renderProjectGroup(group))}
         {projectsOpen && !normalizedSessionSearch && unpinnedProjectGroups.length > 5 && (
           <button
             type="button"

@@ -315,13 +315,12 @@ export function ContextRing({ usage }: ContextRingProps) {
   const { t } = useI18n();
   const popup = useUpwardPopover(196, undefined, "center");
   const id = useId();
-  if (usage?.percent == null) return null;
-  const percent = Math.max(0, Math.min(100, usage.percent));
+  const percent = usage?.percent == null ? null : Math.max(0, Math.min(100, usage.percent));
   const circumference = 2 * Math.PI * 7;
-  const description = `${usage.tokens == null ? "—" : formatTokens(usage.tokens)} / ${formatTokens(usage.contextWindow)} tokens · ${percent.toFixed(0)}%`;
+  const description = `${usage?.tokens == null ? "—" : formatTokens(usage.tokens)} / ${usage == null ? "—" : formatTokens(usage.contextWindow)} tokens · ${percent == null ? t("i18n.unknown") : `${percent.toFixed(0)}%`}`;
   return <>
-    <button ref={popup.anchorRef} type="button" className="composer-context-ring" data-severity={percent < 60 ? "normal" : percent < 85 ? "warning" : "critical"} aria-label={`${t("chat.contextUsage")}: ${description}`} aria-describedby={popup.open ? id : undefined} onMouseEnter={popup.show} onMouseLeave={() => { if (document.activeElement !== popup.anchorRef.current) popup.setOpen(false); }} onFocus={popup.show} onBlur={() => popup.setOpen(false)} onClick={popup.show}>
-      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle className="composer-context-track" cx="10" cy="10" r="7" strokeWidth="2.5" /><circle className="composer-context-progress" cx="10" cy="10" r="7" strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${percent / 100 * circumference} ${circumference}`} transform="rotate(-90 10 10)" /></svg>
+    <button ref={popup.anchorRef} type="button" className="composer-context-ring" data-severity={percent == null ? "unknown" : percent < 60 ? "normal" : percent < 85 ? "warning" : "critical"} aria-label={`${t("chat.contextUsage")}: ${description}`} aria-describedby={popup.open ? id : undefined} onMouseEnter={popup.show} onMouseLeave={() => { if (document.activeElement !== popup.anchorRef.current) popup.setOpen(false); }} onFocus={popup.show} onBlur={() => popup.setOpen(false)} onClick={popup.show}>
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle className="composer-context-track" cx="10" cy="10" r="7" strokeWidth="2.5" /><circle className="composer-context-progress" cx="10" cy="10" r="7" strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${(percent ?? 0) / 100 * circumference} ${circumference}`} transform="rotate(-90 10 10)" /></svg>
     </button>
     {popup.open && createPortal(<div ref={popup.panelRef} id={id} role="tooltip" className="composer-control-popover composer-context-tooltip" style={popup.position}>{description}</div>, document.body)}
   </>;

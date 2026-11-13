@@ -15,8 +15,6 @@ interface Props {
   branch?: string;
   sessionId: string | null;
   projectTrusted: boolean;
-  showSessionDiagnostics: boolean;
-  onSessionDiagnosticsChange: (show: boolean) => void;
   soundEnabled: boolean;
   onSoundToggle: () => void;
   onClose: () => void;
@@ -30,8 +28,6 @@ export function SettingsModal({
   branch,
   sessionId,
   projectTrusted,
-  showSessionDiagnostics,
-  onSessionDiagnosticsChange,
   soundEnabled,
   onSoundToggle,
   onClose,
@@ -129,13 +125,6 @@ export function SettingsModal({
                   <div className="settings-segmented">
                     <button type="button" className={soundEnabled ? "is-active" : ""} onClick={() => { if (!soundEnabled) onSoundToggle(); }}>{t("settings.on")}</button>
                     <button type="button" className={!soundEnabled ? "is-active" : ""} onClick={() => { if (soundEnabled) onSoundToggle(); }}>{t("settings.off")}</button>
-                  </div>
-                </div>
-                <div className="settings-row">
-                  <span>{t("settings.sessionDiagnostics")}</span>
-                  <div className="settings-segmented">
-                    <button type="button" className={!showSessionDiagnostics ? "is-active" : ""} onClick={() => onSessionDiagnosticsChange(false)}>{t("settings.hide")}</button>
-                    <button type="button" className={showSessionDiagnostics ? "is-active" : ""} onClick={() => onSessionDiagnosticsChange(true)}>{t("settings.show")}</button>
                   </div>
                 </div>
               </section>

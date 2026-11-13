@@ -244,6 +244,7 @@ test("legacy bridges without new methods still show errors safely without an ine
 
 test("update entry is an independent sibling after the user-menu trigger", async () => {
   const shell = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
-  assert.match(shell, /<span className="sidebar-user-name">super user<\/span>\s*<\/button>\s*<DesktopUpdateButton \/>/);
+  assert.match(shell, /<span className="sidebar-user-avatar">S<\/span>\s*<\/button>\s*<DesktopUpdateButton \/>/);
+  assert.doesNotMatch(shell, /super user|sidebar-user-name/);
   assert.doesNotMatch(source, /setInterval|setTimeout|alert\(|confirm\(|disabled=/);
 });

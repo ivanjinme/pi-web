@@ -68,6 +68,32 @@ test("closing the right panel or collapsing Explorer keeps the file tree mounted
   assert.doesNotMatch(explorerSource, /\{!rightExplorerCollapsed && \(\s*<div className="right-explorer-tree"/);
 });
 
+test("diagnostics and its setting are removed while the sidebar menu remains accessible", async () => {
+  const settings = await readFile(new URL("./SettingsModal.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /showSessionDiagnostics|SESSION_DIAGNOSTICS_STORAGE_KEY|activeTopPanel|session-info-popover|app-top-bar-actions/);
+  assert.doesNotMatch(settings, /SessionDiagnostics|settings\.sessionDiagnostics/);
+  assert.doesNotMatch(source, /super user|sidebar-user-name/);
+  assert.match(source, /className="sidebar-user-trigger"[^\n]*aria-label=\{translate\("settings.title"\)\}/);
+  const footer = styles.match(/^\.sidebar-user\s*\{([^}]*)\}/m)?.[1];
+  assert.ok(footer);
+  assert.doesNotMatch(footer, /border-top/);
+  const avatar = styles.match(/^\.sidebar-user-avatar\s*\{([^}]*)\}/m)?.[1];
+  assert.ok(avatar);
+  assert.match(avatar, /width: 22px;/);
+  assert.match(avatar, /height: 22px;/);
+  assert.match(avatar, /flex: 0 0 22px;/);
+  assert.match(avatar, /background: #0070e8;/);
+  assert.match(avatar, /color: #fff;/);
+  const trigger = styles.match(/^\.sidebar-user-trigger\s*\{([^}]*)\}/m)?.[1];
+  assert.ok(trigger);
+  assert.match(trigger, /width: 22px;/);
+  assert.match(trigger, /height: 22px;/);
+  assert.match(trigger, /flex: 0 0 22px;/);
+  assert.match(trigger, /padding: 0;/);
+  assert.match(trigger, /margin: 0 auto 4px 4px;/);
+});
+
 test("cross-project navigation clears open file artifacts", () => {
   assert.match(selectSessionSource, /const nextProject = session\.cwd;/);
   assert.match(selectSessionSource, /if \(currentProject && currentProject !== nextProject\) \{\s*dispatchArtifact\(\{ type: "reset" \}\);\s*\}/);

@@ -127,11 +127,16 @@ test("model chip falls back to model ID and unknown thinking depth", () => {
   assert.match(html, /class="composer-control-truncate">unlisted-id<\/span><span class="composer-model-depth">· —<\/span>/);
 });
 
-test("context ring stays hidden until its percentage is known", () => {
+test("context ring remains visible with an unknown summary until its percentage is known", () => {
   for (const usage of [undefined, null, { percent: null, contextWindow: 1000, tokens: 500 }]) {
-    assert.equal(renderRing(usage), "");
-    assert.doesNotMatch(renderInput({ contextUsage: usage }), /composer-context-ring/);
+    const html = renderRing(usage);
+    assert.match(html, /class="composer-context-ring" data-severity="unknown"/);
+    assert.match(html, /tokens · Unknown/);
+    assert.doesNotMatch(html, /tokens · 0%/);
+    assert.match(renderInput({ contextUsage: usage }), /composer-context-ring/);
   }
+  assert.match(renderRing(null), /Context usage: — \/ — tokens · Unknown/);
+  assert.match(renderRing({ percent: null, contextWindow: 1000, tokens: 500 }), /Context usage: 500 \/ 1.0k tokens · Unknown/);
 });
 
 test("context ring clamps percentage and applies severity thresholds to its accessible token summary", () => {

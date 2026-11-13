@@ -9,6 +9,7 @@ import {
   loadHiddenProjectFolders,
   loadProjectFolders,
   rememberProjectFolder,
+  projectPathKey,
 } from "@/lib/project-folders";
 import { useI18n } from "@/hooks/useI18n";
 import { DirectoryPicker } from "./DirectoryPicker";
@@ -27,7 +28,7 @@ interface ProjectEntry {
 }
 
 function normalizeRoot(path: string): string {
-  return path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  return projectPathKey(path);
 }
 
 function projectName(cwd: string): string {
@@ -55,6 +56,7 @@ export function NewTaskProjectPicker({ resetKey, selectedCwd, onSelect, onClear,
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [defaultWorkspace, setDefaultWorkspace] = useState<string | null>(null);
   // Session-derived roots (server truth) are merged in when the popover opens;
   // localStorage folders seed the list instantly so it is never blank.
   const [entries, setEntries] = useState<ProjectEntry[]>(() =>
@@ -69,6 +71,22 @@ export function NewTaskProjectPicker({ resetKey, selectedCwd, onSelect, onClear,
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const entriesRequestRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (defaultWorkspace !== null) return;
+    const controller = new AbortController();
+    setError(null);
+    const loadDefaultWorkspace = async () => {
+      const response = await fetch("/api/cwd/default", { signal: controller.signal });
+      const data = await response.json() as { cwd?: string; error?: string };
+      if (!response.ok || !data.cwd) throw new Error(data.error ?? `HTTP ${response.status}`);
+      if (!controller.signal.aborted) setDefaultWorkspace(data.cwd);
+    };
+    void loadDefaultWorkspace().catch((cause) => {
+      if (!controller.signal.aborted) setError(String(cause));
+    });
+    return () => controller.abort();
+  }, [defaultWorkspace, open, resetKey]);
 
   const refreshEntries = useCallback(async () => {
     entriesRequestRef.current?.abort();
@@ -156,13 +174,18 @@ export function NewTaskProjectPicker({ resetKey, selectedCwd, onSelect, onClear,
   }, [open, refreshEntries]);
 
   const filtered = useMemo(() => {
-    const visible = entries.filter((entry) => !isProjectFolderHidden(entry.root, hiddenProjectFolders));
+    // 默认路径确认前不展示候选项，避免默认工作区短暂出现在项目列表。
+    if (defaultWorkspace === null) return [];
+    const visible = entries.filter((entry) =>
+      normalizeRoot(entry.root) !== normalizeRoot(defaultWorkspace)
+      && !isProjectFolderHidden(entry.root, hiddenProjectFolders),
+    );
     const q = query.trim().toLowerCase();
     if (!q) return visible;
     return visible.filter((entry) =>
       entry.root.toLowerCase().includes(q) || projectName(entry.root).toLowerCase().includes(q),
     );
-  }, [entries, hiddenProjectFolders, query]);
+  }, [defaultWorkspace, entries, hiddenProjectFolders, query]);
 
   const chooseProject = useCallback((cwd: string) => {
     onSelect(cwd);
@@ -199,8 +222,10 @@ export function NewTaskProjectPicker({ resetKey, selectedCwd, onSelect, onClear,
     }
   }, [onFocusComposer, onSelect, validating]);
 
-  const selectedKey = selectedCwd ? normalizeRoot(selectedCwd) : null;
-  const selectedLabel = selectedCwd ? projectName(selectedCwd) : t("chat.chooseProject");
+  const noProject = !selectedCwd || (defaultWorkspace !== null && normalizeRoot(selectedCwd) === normalizeRoot(defaultWorkspace));
+  const selectedProject = defaultWorkspace !== null && !noProject ? selectedCwd : null;
+  const selectedKey = selectedProject ? normalizeRoot(selectedProject) : null;
+  const selectedLabel = selectedProject ? projectName(selectedProject) : t("chat.chooseProject");
 
   return (
     <div className="new-task-project-picker">
@@ -211,14 +236,14 @@ export function NewTaskProjectPicker({ resetKey, selectedCwd, onSelect, onClear,
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title={selectedCwd ?? t("chat.chooseProjectHint")}
+        title={selectedProject ?? t("chat.chooseProjectHint")}
         className="new-task-project-trigger"
-        style={{ color: selectedCwd ? "var(--text-muted)" : undefined, paddingRight: selectedCwd ? 2 : 8 }}
+        style={{ color: selectedProject ? "var(--text-muted)" : undefined, paddingRight: selectedProject ? 2 : 8 }}
       >
         <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M2.5 5.5h5l1.7 2h8.3v8.5h-15z" /></svg>
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedLabel}</span>
       </button>
-      {selectedCwd && (
+      {selectedProject && (
         <button
           type="button"
           className="new-task-project-clear"
@@ -243,7 +268,11 @@ export function NewTaskProjectPicker({ resetKey, selectedCwd, onSelect, onClear,
             />
           </div>
           <div className="project-popover-list">
-            {filtered.length === 0 && (
+            {error && <div role="alert" style={{ padding: "10px 9px", fontSize: 12, color: "#f87171" }}>{error}</div>}
+            {!error && defaultWorkspace === null && (
+              <div style={{ padding: "10px 9px", fontSize: 12, color: "var(--text-dim)" }}>{t("sidebar.loading")}</div>
+            )}
+            {defaultWorkspace !== null && filtered.length === 0 && (
               <div style={{ padding: "10px 9px", fontSize: 12, color: "var(--text-dim)" }}>{t("chat.noMatchingProjects")}</div>
             )}
             {filtered.map((entry) => {
@@ -273,9 +302,12 @@ export function NewTaskProjectPicker({ resetKey, selectedCwd, onSelect, onClear,
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><line x1="8" y1="3" x2="8" y2="13" /><line x1="3" y1="8" x2="13" y2="8" /></svg>
               {t("chat.newProject")}
             </button>
-            <button type="button" className="project-popover-action" onClick={clearProject}>
+            <button type="button" className="project-popover-action" onClick={clearProject} aria-current={noProject || undefined}>
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><line x1="4" y1="4" x2="12" y2="12" /><line x1="12" y1="4" x2="4" y2="12" /></svg>
               {t("chat.noProjectMode")}
+              {noProject && (
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ marginLeft: "auto", flexShrink: 0 }}><polyline points="3 8.5 6.5 12 13 4.5" /></svg>
+              )}
             </button>
           </div>
         </div>,

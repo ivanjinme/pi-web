@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 import { getDefaultWorkspacePath } from "@/lib/default-workspace";
 import { allowFileRoot } from "@/lib/file-access";
 
+export async function GET() {
+  return NextResponse.json({ cwd: getDefaultWorkspacePath() });
+}
+
 // Creates one deterministic fallback workspace. This intentionally performs no
 // home-directory enumeration: output tracing must never discover user files.
 export async function POST() {
