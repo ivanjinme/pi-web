@@ -204,8 +204,7 @@ if (holdsSingleInstance) app.whenReady().then(async () => {
       const now = Date.now();
       if (progress.phase !== "ready" && now - lastToolProgress < 250) return;
       lastToolProgress = now;
-      const text = `正在准备基础工具：${progress.completedFiles}/${progress.totalFiles}。后续普通更新将复用这些工具。`;
-      void window.webContents.executeJavaScript(`document.querySelector('main p')?.replaceChildren(document.createTextNode(${JSON.stringify(text)}))`).catch((error) => console.error("[desktop] 无法显示工具准备进度:", error.message));
+      console.log(`[desktop] 正在准备基础工具：${progress.completedFiles}/${progress.totalFiles}`);
     };
     const toolsRoot = await resolveDesktopTools({ resourcesPath: process.resourcesPath, storeBase: toolsetsBase, signal: startup.signal, onProgress: onToolProgress });
     service = await startProductionServer({

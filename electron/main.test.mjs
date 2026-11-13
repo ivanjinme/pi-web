@@ -194,7 +194,7 @@ test("packaged mode shows initialization before starting its service and stops i
   `, 'win32', true);
 });
 
-test("shared tools are profile-independent and startup progress is throttled", () => {
+test("shared tools are profile-independent and startup progress is logged without changing the splash", () => {
   runMain(`
     if (process.env.LOCALAPPDATA) {
       assert.equal(production.starts[0].toolsetsBase, process.env.LOCALAPPDATA);
@@ -204,7 +204,10 @@ test("shared tools are profile-independent and startup progress is throttled", (
     assert.equal(production.starts[0].serverRoot, undefined, 'all installs launch their bundled server');
     assert.equal(production.starts[0].readyTimeout, undefined);
     const now = Date.now;
+    const log = console.log;
+    const progressLogs = [];
     Date.now = () => 1000;
+    console.log = (message) => progressLogs.push(message);
     try {
       const progress = production.starts[0].onToolProgress;
       const count = window.webContents.scripts.length;
@@ -212,9 +215,10 @@ test("shared tools are profile-independent and startup progress is throttled", (
       progress({ phase:'copying', completedFiles:1, totalFiles:5 });
       progress({ phase:'ready', completedFiles:5, totalFiles:5, reused:false });
       progress({ phase:'ready', completedFiles:5, totalFiles:5, reused:true });
-      assert.equal(window.webContents.scripts.length, count + 2);
-      assert.match(window.webContents.scripts.at(-1), /5\\/5/);
-    } finally { Date.now = now; }
+      assert.equal(window.webContents.scripts.length, count);
+      assert.equal(progressLogs.length, 2);
+      assert.match(progressLogs.at(-1), /5\\/5/);
+    } finally { Date.now = now; console.log = log; }
   `, 'win32', true);
 });
 
